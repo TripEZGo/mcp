@@ -36,7 +36,7 @@ Call `search_place` first and pass the returned `placeId` to `create_event` / `u
 
 ## Attachments
 
-- A file on this computer: `add_attachment_from_path` (needs the `TripEZGo/mcp` bridge; up to 50 MB).
+- A file on this computer: `add_attachment_from_path` (needs the `TripEZGo/mcp` bridge; up to 20 MB, the limit the app states).
 - Small generated content: `add_attachment` (base64, up to 5 MB).
 - Without `eventId` the file hangs on the trip itself.
 

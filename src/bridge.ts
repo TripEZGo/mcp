@@ -1,7 +1,7 @@
 import { ErrorCode } from "@modelcontextprotocol/sdk/types.js";
 import type { BridgeConfig } from "./config.js";
 import { unauthorizedMessage, unreachableMessage } from "./messages.js";
-import { LOCAL_TOOL_NAME, addAttachmentFromPath, localTool } from "./upload.js";
+import { DEFAULT_UPLOAD_LIMIT_BYTES, LOCAL_TOOL_NAME, addAttachmentFromPath, localTool, uploadLimitFrom } from "./upload.js";
 
 export interface BridgeOptions extends BridgeConfig {
   fetch?: typeof fetch;
@@ -24,6 +24,8 @@ type Id = string | number | null;
 export class Bridge {
   private sessionId: string | undefined;
   private protocolVersion: string | undefined;
+  /** The app's `_meta["tripezgo/uploadLimitBytes"]` from `initialize`; the default until it says. */
+  private uploadLimitBytes = DEFAULT_UPLOAD_LIMIT_BYTES;
 
   constructor(private readonly options: BridgeOptions) {}
 
@@ -46,6 +48,7 @@ export class Bridge {
         token: this.options.token,
         fetch: this.options.fetch,
         timeoutMs: this.options.uploadTimeoutMs,
+        maxBytes: this.uploadLimitBytes,
       });
       return [JSON.stringify({ jsonrpc: "2.0", id: message.id, result })];
     }
@@ -115,12 +118,13 @@ export class Bridge {
     }
 
     if (isObject(parsed) && isObject(parsed.result)) {
-      if (request?.method === "initialize" && typeof parsed.result.protocolVersion === "string") {
-        this.protocolVersion = parsed.result.protocolVersion;
+      if (request?.method === "initialize") {
+        if (typeof parsed.result.protocolVersion === "string") this.protocolVersion = parsed.result.protocolVersion;
+        this.uploadLimitBytes = uploadLimitFrom(parsed.result) ?? DEFAULT_UPLOAD_LIMIT_BYTES;
       }
       if (request?.method === "tools/list" && !hasCursor(request) && Array.isArray(parsed.result.tools)) {
         if (!parsed.result.tools.some((tool) => isObject(tool) && tool.name === LOCAL_TOOL_NAME)) {
-          parsed.result.tools.push(localTool);
+          parsed.result.tools.push(localTool(this.uploadLimitBytes));
         }
         return JSON.stringify(parsed);
       }

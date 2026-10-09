@@ -11,7 +11,7 @@ This repo holds the few things the phone can't do:
 - **A stdio bridge** for clients that only start local processes (Claude Desktop). It forwards every JSON-RPC
   message to the app unchanged and writes the answer back unchanged.
 - **`add_attachment_from_path`**, a local tool the bridge adds to the app's tool list: it reads a file on this
-  computer and uploads it to the app (up to 50 MB).
+  computer and uploads it to the app (up to 20 MB, the app's limit for one attachment; the app states it when the bridge connects).
 - **A skill** (`skills/tripezgo/SKILL.md`) that tells an agent how to use the tools well.
 
 This repo owns no tool definitions — they all come from the app, so the two never fall out of step.
@@ -67,7 +67,7 @@ Claude Desktop only launches local stdio servers, so it goes through this repo's
   "mcpServers": {
     "tripezgo": {
       "command": "npx",
-      "args": ["-y", "github:TripEZGo/mcp", "--url", "http://IP:PORT", "--token", "TOKEN"]
+      "args": ["-y", "github:TripEZGo/mcp", "--url", "http://IP:PORT", "--token=TOKEN"]
     }
   }
 }

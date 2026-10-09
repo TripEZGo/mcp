@@ -1,6 +1,6 @@
 import { ErrorCode } from "@modelcontextprotocol/sdk/types.js";
 import { unauthorizedMessage, unreachableMessage } from "./messages.js";
-import { LOCAL_TOOL_NAME, addAttachmentFromPath, localTool } from "./upload.js";
+import { DEFAULT_UPLOAD_LIMIT_BYTES, LOCAL_TOOL_NAME, addAttachmentFromPath, localTool, uploadLimitFrom } from "./upload.js";
 /**
  * Turns one stdio JSON-RPC line into the lines to write back.
  *
@@ -12,6 +12,8 @@ export class Bridge {
     options;
     sessionId;
     protocolVersion;
+    /** The app's `_meta["tripezgo/uploadLimitBytes"]` from `initialize`; the default until it says. */
+    uploadLimitBytes = DEFAULT_UPLOAD_LIMIT_BYTES;
     constructor(options) {
         this.options = options;
     }
@@ -35,6 +37,7 @@ export class Bridge {
                 token: this.options.token,
                 fetch: this.options.fetch,
                 timeoutMs: this.options.uploadTimeoutMs,
+                maxBytes: this.uploadLimitBytes,
             });
             return [JSON.stringify({ jsonrpc: "2.0", id: message.id, result })];
         }
@@ -102,12 +105,14 @@ export class Bridge {
             return body.replace(/\r?\n/g, " ");
         }
         if (isObject(parsed) && isObject(parsed.result)) {
-            if (request?.method === "initialize" && typeof parsed.result.protocolVersion === "string") {
-                this.protocolVersion = parsed.result.protocolVersion;
+            if (request?.method === "initialize") {
+                if (typeof parsed.result.protocolVersion === "string")
+                    this.protocolVersion = parsed.result.protocolVersion;
+                this.uploadLimitBytes = uploadLimitFrom(parsed.result) ?? DEFAULT_UPLOAD_LIMIT_BYTES;
             }
             if (request?.method === "tools/list" && !hasCursor(request) && Array.isArray(parsed.result.tools)) {
                 if (!parsed.result.tools.some((tool) => isObject(tool) && tool.name === LOCAL_TOOL_NAME)) {
-                    parsed.result.tools.push(localTool);
+                    parsed.result.tools.push(localTool(this.uploadLimitBytes));
                 }
                 return JSON.stringify(parsed);
             }

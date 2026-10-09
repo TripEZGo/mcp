@@ -26,6 +26,20 @@ describe("parseConfig", () => {
     );
   });
 
+  // The app's token is base64url, so about one in 4096 starts with "-" — and one starting with "--" must work too.
+  it("takes the next argument after --token / --url as the value even when it starts with a dash", () => {
+    expect(parseConfig(["--url", "http://1.2.3.4:8765", "--token", "--Ab9z_"], {}).token).toBe("--Ab9z_");
+    expect(parseConfig(["--url", "http://1.2.3.4:8765", "--token", "-Ab9z_"], {}).token).toBe("-Ab9z_");
+    expect(parseConfig(["--token", "-x", "--url", "http://1.2.3.4:8765"], {})).toEqual({
+      baseUrl: "http://1.2.3.4:8765",
+      token: "-x",
+    });
+  });
+
+  it("accepts --token=<value> with a token that starts with a dash", () => {
+    expect(parseConfig(["--url", "http://1.2.3.4:8765", "--token=-Ab9z_"], {}).token).toBe("-Ab9z_");
+  });
+
   it("rejects missing values and unknown options", () => {
     expect(() => parseConfig(["--token", "t"], {})).toThrow(ConfigError);
     expect(() => parseConfig(["--url", "http://a:1"], {})).toThrow(ConfigError);

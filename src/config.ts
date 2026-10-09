@@ -24,8 +24,9 @@ export function parseConfig(argv: readonly string[], env: Record<string, string 
       flags.set(arg.slice(2, eq), arg.slice(eq + 1));
       continue;
     }
+    // The next argument is the value, whatever it looks like: the token is base64url and can start with "-".
     const value = argv[i + 1];
-    if (value === undefined || value.startsWith("--")) {
+    if (value === undefined) {
       throw new ConfigError(`${arg} needs a value`);
     }
     flags.set(arg.slice(2), value);

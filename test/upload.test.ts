@@ -2,7 +2,7 @@ import { mkdtemp, rm, truncate, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { MAX_UPLOAD_BYTES, addAttachmentFromPath } from "../src/upload.js";
+import { DEFAULT_UPLOAD_LIMIT_BYTES, addAttachmentFromPath } from "../src/upload.js";
 import { FakeApp, closedPortUrl, json } from "./fakeApp.js";
 
 const TOKEN = "tok_upload";
@@ -84,16 +84,36 @@ describe("add_attachment_from_path", () => {
     expect(app.requests).toHaveLength(0);
   });
 
-  it("refuses a file over 50 MB before uploading it", async () => {
+  it("without a limit from the app, refuses a file over 20 MB before uploading it", async () => {
     const big = join(dir, "video.mov");
     await writeFile(big, "");
-    await truncate(big, MAX_UPLOAD_BYTES + 1);
+    await truncate(big, DEFAULT_UPLOAD_LIMIT_BYTES + 1);
 
     const result = await addAttachmentFromPath({ path: big }, { baseUrl, token: TOKEN });
 
+    expect(DEFAULT_UPLOAD_LIMIT_BYTES).toBe(20 * 1024 * 1024);
     expect(result.isError).toBe(true);
-    expect((result.content[0] as { text: string }).text).toMatch(/50 MB/);
+    expect((result.content[0] as { text: string }).text).toMatch(/limited to 20 MB/);
     expect(app.requests).toHaveLength(0);
+  });
+
+  it("uses the limit it is given (the app's initialize _meta) instead of the default", async () => {
+    const limit = 1024 * 1024;
+    const over = join(dir, "over.pdf");
+    const at = join(dir, "at.pdf");
+    await writeFile(over, "");
+    await truncate(over, limit + 1);
+    await writeFile(at, "");
+    await truncate(at, limit);
+    app.handler = () => json(200, { attachmentId: "A-3", name: "at.pdf", byteCount: limit });
+
+    const refused = await addAttachmentFromPath({ path: over }, { baseUrl, token: TOKEN, maxBytes: limit });
+    const accepted = await addAttachmentFromPath({ path: at }, { baseUrl, token: TOKEN, maxBytes: limit });
+
+    expect(refused.isError).toBe(true);
+    expect((refused.content[0] as { text: string }).text).toMatch(/limited to 1 MB/);
+    expect(accepted.isError).toBeFalsy();
+    expect(app.requests).toHaveLength(1);
   });
 
   it("turns a 409 (api level mismatch) into an error that says to update the app or the bridge", async () => {

@@ -1,3 +1,6 @@
+import { mkdtemp, rm, truncate, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { Bridge } from "../src/bridge.js";
 import { LOCAL_TOOL_NAME } from "../src/upload.js";
@@ -94,6 +97,54 @@ describe("Bridge forwarding", () => {
     const local = JSON.parse(out[0]).result.tools[1];
     expect(local.inputSchema.required).toEqual(["path"]);
     expect(Object.keys(local.inputSchema.properties)).toEqual(["path", "tripId", "eventId", "name"]);
+  });
+
+  it("takes the upload limit from initialize's _meta: the local tool states it and refuses a bigger file", async () => {
+    const limit = 1024 * 1024;
+    app.handler = (req) => {
+      const msg = JSON.parse(req.body.toString());
+      if (msg.method === "initialize") {
+        return json(200, {
+          jsonrpc: "2.0",
+          id: msg.id,
+          result: {
+            protocolVersion: "2025-06-18",
+            _meta: { "tripezgo/apiLevel": 1, "tripezgo/uploadLimitBytes": limit },
+          },
+        });
+      }
+      return json(200, { jsonrpc: "2.0", id: msg.id, result: { tools: [] } });
+    };
+    const dir = await mkdtemp(join(tmpdir(), "tripezgo-mcp-bridge-"));
+    const big = join(dir, "big.pdf");
+    await writeFile(big, "");
+    await truncate(big, limit + 1);
+
+    try {
+      await bridge.handle('{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-06-18"}}');
+      const list = await bridge.handle('{"jsonrpc":"2.0","id":2,"method":"tools/list"}');
+      const call = await bridge.handle(
+        JSON.stringify({ jsonrpc: "2.0", id: 3, method: "tools/call", params: { name: LOCAL_TOOL_NAME, arguments: { path: big } } }),
+      );
+
+      const local = JSON.parse(list[0]).result.tools.find((t: { name: string }) => t.name === LOCAL_TOOL_NAME);
+      expect(local.description).toContain("up to 1 MB");
+      const reply = JSON.parse(call[0]);
+      expect(reply.result.isError).toBe(true);
+      expect(reply.result.content[0].text).toMatch(/limited to 1 MB/);
+      expect(app.requests.filter((r) => r.path === "/upload")).toHaveLength(0);
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("without an upload limit from the app, the local tool states the 20 MB default", async () => {
+    app.handler = () => json(200, { jsonrpc: "2.0", id: 2, result: { tools: [] } });
+
+    const list = await bridge.handle('{"jsonrpc":"2.0","id":2,"method":"tools/list"}');
+
+    const local = JSON.parse(list[0]).result.tools.find((t: { name: string }) => t.name === LOCAL_TOOL_NAME);
+    expect(local.description).toContain("up to 20 MB");
   });
 
   it("does not append the local tool to a later tools/list page", async () => {

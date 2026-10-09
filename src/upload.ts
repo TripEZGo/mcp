@@ -7,36 +7,54 @@ import { mimeTypeFor } from "./mime.js";
 
 /** The upload contract this bridge speaks. The app answers 409 when it no longer matches. */
 export const API_LEVEL = 1;
-export const MAX_UPLOAD_BYTES = 50 * 1024 * 1024;
+/**
+ * Used until the app says otherwise. The app states its own limit in the `initialize` result as
+ * `_meta["tripezgo/uploadLimitBytes"]` (one attachment's limit in the app), and that is what counts.
+ */
+export const DEFAULT_UPLOAD_LIMIT_BYTES = 20 * 1024 * 1024;
+export const UPLOAD_LIMIT_META_KEY = "tripezgo/uploadLimitBytes";
 export const LOCAL_TOOL_NAME = "add_attachment_from_path";
 
-export const localTool: Tool = {
-  name: LOCAL_TOOL_NAME,
-  title: "Attach a file from this computer",
-  description:
-    "Attach a file that is on this computer to a TripEZGo trip or event (up to 50 MB). " +
-    "The file is read here and uploaded to the app. Without eventId the file is attached to the trip " +
-    "itself; without tripId the app's default trip is used. Prefer this over add_attachment for any file on disk.",
-  inputSchema: {
-    type: "object",
-    properties: {
-      path: {
-        type: "string",
-        description: "Path of the file on this computer. Absolute, ~/…, or relative to the bridge's working directory.",
+/** The app's upload limit from an `initialize` result, or undefined when it does not state a usable one. */
+export function uploadLimitFrom(initializeResult: unknown): number | undefined {
+  if (!initializeResult || typeof initializeResult !== "object") return undefined;
+  const meta = (initializeResult as { _meta?: unknown })._meta;
+  if (!meta || typeof meta !== "object") return undefined;
+  const value = (meta as Record<string, unknown>)[UPLOAD_LIMIT_META_KEY];
+  return typeof value === "number" && Number.isSafeInteger(value) && value > 0 ? value : undefined;
+}
+
+export function localTool(maxBytes: number = DEFAULT_UPLOAD_LIMIT_BYTES): Tool {
+  return {
+    name: LOCAL_TOOL_NAME,
+    title: "Attach a file from this computer",
+    description:
+      `Attach a file that is on this computer to a TripEZGo trip or event (up to ${formatMB(maxBytes)}). ` +
+      "The file is read here and uploaded to the app. Without eventId the file is attached to the trip " +
+      "itself; without tripId the app's default trip is used. Prefer this over add_attachment for any file on disk.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        path: {
+          type: "string",
+          description: "Path of the file on this computer. Absolute, ~/…, or relative to the bridge's working directory.",
+        },
+        tripId: { type: "string", description: "Trip id from list_trips. Defaults to the app's default trip." },
+        eventId: { type: "string", description: "Event id from list_events. Omit to attach to the trip." },
+        name: { type: "string", description: "File name to show in the app. Defaults to the file's own name." },
       },
-      tripId: { type: "string", description: "Trip id from list_trips. Defaults to the app's default trip." },
-      eventId: { type: "string", description: "Event id from list_events. Omit to attach to the trip." },
-      name: { type: "string", description: "File name to show in the app. Defaults to the file's own name." },
+      required: ["path"],
     },
-    required: ["path"],
-  },
-};
+  };
+}
 
 export interface UploadOptions {
   baseUrl: string;
   token: string;
   fetch?: typeof fetch;
   timeoutMs?: number;
+  /** The app's upload limit (from `initialize`); defaults to `DEFAULT_UPLOAD_LIMIT_BYTES`. */
+  maxBytes?: number;
 }
 
 export async function addAttachmentFromPath(args: unknown, options: UploadOptions): Promise<CallToolResult> {
@@ -56,8 +74,9 @@ export async function addAttachmentFromPath(args: unknown, options: UploadOption
     if (isErrno(error, "ENOENT")) return failure(`No file at ${filePath}.`);
     return failure(`Can't read ${filePath}: ${(error as Error).message}`);
   }
-  if (size > MAX_UPLOAD_BYTES) {
-    return failure(`${filePath} is ${formatMB(size)}; TripEZGo attachments are limited to ${formatMB(MAX_UPLOAD_BYTES)}.`);
+  const maxBytes = options.maxBytes ?? DEFAULT_UPLOAD_LIMIT_BYTES;
+  if (size > maxBytes) {
+    return failure(`${filePath} is ${formatMB(size)}; TripEZGo attachments are limited to ${formatMB(maxBytes)}.`);
   }
 
   let bytes: Buffer;
