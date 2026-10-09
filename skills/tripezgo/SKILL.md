@@ -1,75 +1,63 @@
 ---
 name: tripezgo
-description: Read and edit any of the user's trips in the TripEZGo iPhone app through its MCP server — itinerary events and travel legs, to-dos, attachments, notes, shopping list, map markers, trip info, and creating new trips. Use when the user asks to plan, build, change or review a trip in TripEZGo.
+description: Plan trips and work in the TripEZGo iPhone app through its MCP server. Use when the user wants a trip planned or an itinerary drafted (any destination), or wants to read or change anything in TripEZGo — trips, events, legs, to-dos, notes, markers, shopping list, attachments.
 ---
 
 # TripEZGo
 
-TripEZGo is a travel-planning iPhone app: the phone shows one trip at a time, each with a day-by-day calendar of events, travel legs
-between events, and to-dos, files, notes, a shopping list and map markers attached to the trip. The `tripezgo`
-MCP server **is the app itself** and reaches **all** of the user's trips, not only the one open on the phone. It is
-reachable only while the phone shows the "連接電腦 AI" (connect computer AI)
-page on the same Wi-Fi. If every call fails to connect, ask the user to open that page again and keep the app
-in the foreground.
+TripEZGo is a travel-planning iPhone app: one trip at a time on the phone, each with a day-by-day calendar of
+events, travel legs between events, and to-dos, files, notes, a shopping list and map markers. The `tripezgo`
+MCP server **is the app itself** and reaches **all** of the user's trips. It answers only while the phone shows
+the "連接電腦 AI" (connect computer AI) page on the same Wi-Fi; if every call fails to connect, ask the user to
+open that page again and keep the app in the foreground.
 
-> This skill is a first skeleton and will be refined.
+## Route
 
-## Start here
+| The user wants | Read |
+|---|---|
+| A trip planned, an itinerary drafted, places suggested for a destination | [`references/planning.md`](references/planning.md) — the whole planning flow, start to finish |
+| (inside planning) the author's travel journals, web articles, checking a place is open | [`references/sources.md`](references/sources.md) |
+| An approved plan written into the app, or any edit to a trip | [`references/writing-to-the-app.md`](references/writing-to-the-app.md) |
 
-1. `list_trips` — see every trip. Calls without `tripId` go to the app's **default trip** ("this trip" /
-   "the current trip" means it). When the user opened the link from Settings, the default is the trip open on
-   their phone; when they opened it from adding a new trip, there is no default — `create_trip` first or pass
-   `tripId`. The default is only a convenience — any tool works on any trip you pass as `tripId`; when the user
-   talks about another trip, find it in `list_trips`. `create_trip` makes the new trip the default — and the
-   trip the phone shows — whichever way the user opened the page. If there is no default trip, pass `tripId`
-   (or create a trip first).
-2. Pick the trip with the user; pass its `tripId` explicitly from then on.
-3. `get_trip`, then `list_events` (optionally `from` / `to`) to see the itinerary and its legs before changing
-   anything.
+Planning always ends in a draft the user approves in the conversation; nothing is written to the app before
+that approval.
 
-## Formats
+## Operating rules
 
-- Dates: `YYYY-MM-DD`. Times: `HH:mm`, 24-hour, **in the trip's own time zone** (see `get_trip`) — not the
-  computer's.
-- Days: `dayNumber` (day 1 is the first day) or a `date` inside the trip. A trip whose dates are undecided only
-  takes `dayNumber`.
-- Legs belong to the event travelled to: `set_leg` / `clear_leg` take its `eventId`. For the leg into a day's
-  closing all-day event (e.g. back to the hotel), pass `fromEventId` too.
-- A leg's `durationMinutes` is `null` when the user never gave one (the app estimates it from the map).
-- Ids (`tripId`, `eventId`, `placeId`, …) come from earlier tool results. Never invent one.
-- Event kinds and shopping categories are enums in the tool schemas — use one of the listed values.
-- Notes accept a small Markdown subset: `#` headings and `-` lists. Notes have no checkboxes — `- [ ]` / `- [x]` is refused; put things to tick off in to-dos (`create_todo`).
+These hold for every call, planning or not.
 
-## Places
+**Which trip.** `list_trips` first. Calls without `tripId` go to the link's **default trip** ("this trip").
+Opened from Settings, the default is the trip open on the phone; opened from adding a new trip, there is no
+default — `create_trip` first or pass `tripId`. `create_trip` makes the new trip the default and the trip the
+phone shows. Once a trip is chosen, pass its `tripId` explicitly. Read it with `get_trip` and `list_events`
+before changing it.
 
-- **Events and map markers:** `search_place`, then pass its `placeId` to `create_event` / `update_event` /
-  `create_marker` / `update_marker`. If the candidates look unrelated, retry with the place's English or
-  local-language name.
-- An event may take only a `placeName` (no map point unless it reads like an address the app can find).
-- **A marker must have a point:** a `placeId` from `search_place`, or `latitude` + `longitude`. A name alone
-  is refused.
-- **A trip's main place** (a city or region, with its time zone) comes from `search_trip_place`; pass its
-  `placeId` to `create_trip` / `update_trip`.
+**Permissions.** `canEditContent` gates events, legs, to-dos, shopping, markers, attachments and notes;
+`canEditTripInfo` gates name, dates, main place and time zone. The demo trip and read-only shared trips allow
+neither; a trip someone else shared allows content only. A refused write answers with why — tell the user
+rather than retrying.
 
-## Attachments
+**Formats.** Dates `YYYY-MM-DD`; times `HH:mm`, 24-hour, in the **trip's** time zone (from `get_trip`), never
+the computer's. Days are `dayNumber` (day 1 = first day) or a `date` inside the trip; a trip with undecided
+dates takes only `dayNumber`. Ids come from earlier tool results — never invent one. Enums (event types,
+shopping categories, leg modes) are listed in the tool schemas.
 
-- A file on this computer: `add_attachment_from_path` — only when you are connected through this `TripEZGo/mcp`
-  bridge (the Claude Desktop setup); up to 20 MB, the limit the app states. Without it, ask the user to make
-  the file smaller than 5 MB or to connect with the Claude Desktop setup.
-- Small generated content: `add_attachment` (base64, up to 5 MB).
-- A new attachment hangs on the trip itself (no `eventId`) or on one event (`eventId`); it cannot be added to a
-  leg. `fromEventId` only appears in `list_attachments` results (an attachment on a leg, added in the app) and
-  in `detach_attachment`, where `eventId` (the event travelled to) plus `fromEventId` takes it off that leg.
+**Places.** A trip's main place (city or region, with its time zone): `search_trip_place` → `placeId` to
+`create_trip` / `update_trip`. An event's or marker's place: `search_place` → `placeId`; if the candidates look
+unrelated, retry with the English or local-language name. A marker needs a point (`placeId`, or latitude +
+longitude). `placeId`s last for the current link only.
 
-## Be careful
+**Legs.** A leg belongs to the event travelled **to**: `set_leg` / `clear_leg` take its `eventId`. For the leg
+into a day's closing all-day event (back to the hotel), pass `fromEventId` too. `durationMinutes: null` means
+the app estimates it from the map.
 
-- **Confirm with the user before any delete** (`delete_event`, `delete_todo`, `delete_note`,
-  `delete_shopping_item`, `delete_marker`, `clear_leg`, `detach_attachment`). The app does not ask on the
-  phone; it only lists what you did.
-- Editing or moving one event shifts nothing else. Re-check the day with `list_events` after bulk changes.
-- Check `canEditContent` (events, legs, to-dos, shopping, markers, attachments, notes) and `canEditTripInfo`
-  (name, dates, main place, time zone) on the trip first. The demo trip and read-only shared trips allow
-  neither; a trip someone else shared allows content only. The app answers a refused write with an error saying
-  why — tell the user rather than retrying.
-- Notes have no checkboxes; a thing to tick off is a to-do.
-- Creating a trip can hit the user's trip limit; report the error as-is.
+**Notes and to-dos.** Notes take a Markdown subset: `#` headings and `-` lists, no checkboxes. Anything to
+tick off is a to-do (`create_todo`), on an event (`eventId`) or trip-wide.
+
+**Attachments.** A local file: `add_attachment_from_path` (only through the `TripEZGo/mcp` bridge; up to
+20 MB). Small generated content: `add_attachment` (base64, up to 5 MB). A new attachment hangs on the trip or
+on one event, never on a leg.
+
+**Deletes.** Confirm with the user before any `delete_*`, `clear_leg` or `detach_attachment` — the phone does
+not ask; it only lists what you did. Editing or moving one event shifts nothing else; re-read the day with
+`list_events` after bulk changes. Creating a trip can hit the user's trip limit; report that error as-is.

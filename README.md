@@ -13,7 +13,8 @@ This repo holds the few things the phone can't do:
   message to the app unchanged and writes the answer back unchanged.
 - **`add_attachment_from_path`**, a local tool the bridge adds to the app's tool list: it reads a file on this
   computer and uploads it to the app (up to 20 MB, the app's limit for one attachment; the app states it when the bridge connects).
-- **A skill** (`skills/tripezgo/SKILL.md`) that tells an agent how to use the tools well.
+- **A skill** (`skills/tripezgo/`) that plans a trip with web research and tells an agent how to use the tools
+  well — also installable as a Claude Code plugin (see [Install the planning skill](#install-the-planning-skill)).
 
 This repo owns no tool definitions — they all come from the app, so the two never fall out of step.
 
@@ -107,9 +108,65 @@ when you want to attach local files: point them at the bridge as a stdio server 
   The bridge checks nothing up front: only the upload endpoint depends on it, and the app answers `409` when
   the levels differ. The tool then tells you to update the app or this bridge.
 
-## Using the skill
+## Install the planning skill
 
-Copy `skills/tripezgo` into your agent's skills folder — for Claude Code, `~/.claude/skills/tripezgo/`.
+`skills/tripezgo` teaches the AI to plan a trip the way this app expects: ask the seven things a plan needs,
+pin the destination's time zone with the app, read the TripEZGo author's first-hand travel journals and recent
+travel articles, check that every place is still open on the day it is scheduled, keep each day to a sane
+pace, show a day-by-day draft, and write it into the app only after you approve it. It also carries the
+rules for every other read and edit. **Planning needs an AI with web search turned on**; without it the skill
+declines to plan.
+
+### Claude Code
+
+As a plugin (this repo is its own marketplace), in Claude Code 2.1.275 or later:
+
+```
+/plugin install tripezgo --marketplace TripEZGo/mcp
+```
+
+On older versions, add the marketplace first, then install:
+
+```
+/plugin marketplace add TripEZGo/mcp
+/plugin install tripezgo@tripezgo
+```
+
+The skill then shows up as `tripezgo:tripezgo`. Or skip the plugin and copy the folder yourself:
+
+```sh
+git clone https://github.com/TripEZGo/mcp.git
+cp -R mcp/skills/tripezgo ~/.claude/skills/
+```
+
+### Claude Desktop (and claude.ai)
+
+Custom skills are uploaded as a ZIP of the skill folder. Turn on **Settings › Capabilities › Code execution and
+file creation** first, then:
+
+```sh
+git clone https://github.com/TripEZGo/mcp.git
+cd mcp/skills && zip -r tripezgo.zip tripezgo
+```
+
+In Claude, go to **Customize › Skills**, click **+**, then **+ Create skill › Upload a skill**, and pick
+`tripezgo.zip`. Uploaded skills are private to your account.
+See [Using Skills in Claude](https://support.claude.com/en/articles/12512180-using-skills-in-claude).
+
+### Codex
+
+Codex reads skills in the same `SKILL.md` format from `$HOME/.agents/skills` (every repository) or
+`.agents/skills` in a repository:
+
+```sh
+git clone https://github.com/TripEZGo/mcp.git
+mkdir -p ~/.agents/skills && cp -R mcp/skills/tripezgo ~/.agents/skills/
+```
+
+See [Codex: Build skills](https://learn.chatgpt.com/docs/build-skills). If your Codex has no skills support, point
+`AGENTS.md` at the file instead — add a line such as
+`When planning a trip or using the tripezgo MCP server, read ~/.agents/skills/tripezgo/SKILL.md first and follow it.`
+— or paste `SKILL.md` into the conversation; it tells the AI which file under `references/` to read next.
 
 ## Development
 
@@ -129,7 +186,8 @@ a build to succeed. Rebuild and commit `dist/` with every source change (`npm te
 
 這個 repo 是 TripEZGo iPhone App「連接電腦 AI」功能的電腦端配套。App 本身就是 MCP server（同一個 Wi-Fi 上的
 `http://IP:PORT/mcp`），Claude Code 與 Codex 直接連，不需要這個 repo。這裡只放手機做不到的事：給只吃 stdio 的
-Claude Desktop 用的轉接器、讀電腦本機檔案上傳成附件的 `add_attachment_from_path`，以及 skill 檔。
+Claude Desktop 用的轉接器、讀電腦本機檔案上傳成附件的 `add_attachment_from_path`，以及旅行規劃 skill（Claude Code 可用
+`/plugin install tripezgo --marketplace TripEZGo/mcp` 一行安裝；Claude Desktop 與 Codex 的裝法見上方 Install the planning skill）。
 
 AI 能讀寫 App 裡**所有**旅程，不只手機上開著的那一趟；從設定進來時，開著的那一趟只是 AI 沒指明哪一趟時的預設。
 

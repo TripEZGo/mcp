@@ -1,0 +1,14 @@
+{
+  "name": "tripezgo",
+  "displayName": "TripEZGo",
+  "version": "0.1.0",
+  "description": "Plan trips with web research and write them into the TripEZGo iPhone app through its MCP server",
+  "author": {
+    "name": "TripEZGo",
+    "url": "https://github.com/TripEZGo"
+  },
+  "homepage": "https://github.com/TripEZGo/mcp",
+  "repository": "https://github.com/TripEZGo/mcp",
+  "license": "MIT",
+  "keywords": ["travel", "trip-planning", "itinerary", "mcp", "tripezgo"]
+}

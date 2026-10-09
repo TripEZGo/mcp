@@ -1,0 +1,15 @@
+{
+  "name": "tripezgo",
+  "description": "The TripEZGo trip-planning skill",
+  "owner": {
+    "name": "TripEZGo",
+    "url": "https://github.com/TripEZGo"
+  },
+  "plugins": [
+    {
+      "name": "tripezgo",
+      "source": "./",
+      "description": "Plan trips with web research and write them into the TripEZGo iPhone app"
+    }
+  ]
+}
