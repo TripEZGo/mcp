@@ -52,8 +52,9 @@ in the foreground.
   bridge (the Claude Desktop setup); up to 20 MB, the limit the app states. Without it, ask the user to make
   the file smaller than 5 MB or to connect with the Claude Desktop setup.
 - Small generated content: `add_attachment` (base64, up to 5 MB).
-- Without `eventId` the file hangs on the trip itself. A leg's attachment is `eventId` (the event travelled to)
-  plus `fromEventId`.
+- A new attachment hangs on the trip itself (no `eventId`) or on one event (`eventId`); it cannot be added to a
+  leg. `fromEventId` only appears in `list_attachments` results (an attachment on a leg, added in the app) and
+  in `detach_attachment`, where `eventId` (the event travelled to) plus `fromEventId` takes it off that leg.
 
 ## Be careful
 
