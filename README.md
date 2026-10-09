@@ -1,6 +1,7 @@
 # TripEZGo MCP
 
-Let an AI on your computer plan and edit trips in the **TripEZGo** iPhone app.
+Let an AI on your computer plan and edit your trips in the **TripEZGo** iPhone app — all of them, not only the one
+open on the phone.
 
 The app itself is the MCP server: while its "連接電腦 AI" (connect computer AI) page is open, the iPhone serves
 MCP over Streamable HTTP on your Wi-Fi at `http://IP:PORT/mcp`. Claude Code and Codex connect to that address
@@ -20,8 +21,11 @@ This repo owns no tool definitions — they all come from the app, so the two ne
 
 1. Put the iPhone and the computer on the **same Wi-Fi**.
 2. Open TripEZGo and either
-   - **Settings › 用電腦 AI 編輯** (edit the current trip with a computer AI), or
+   - **Settings › 用電腦 AI 編輯** (edit with a computer AI; the trip open on the phone, if any, is the default), or
    - **New trip › 用電腦 AI 建立旅程** (let the AI create a new trip).
+
+   Either way the AI can read and change **every** trip in the app. The default trip is only the one it uses
+   when it doesn't say which trip.
 3. The page shows the address and a ready-made command for Claude Code, Codex and Claude Desktop. Tap
    **複製命令** (copy command) and paste it on the computer.
 4. Keep the page open. Locking the phone or switching apps pauses the link; coming back resumes it with the same
@@ -126,6 +130,8 @@ a build to succeed. Rebuild and commit `dist/` with every source change (`npm te
 這個 repo 是 TripEZGo iPhone App「連接電腦 AI」功能的電腦端配套。App 本身就是 MCP server（同一個 Wi-Fi 上的
 `http://IP:PORT/mcp`），Claude Code 與 Codex 直接連，不需要這個 repo。這裡只放手機做不到的事：給只吃 stdio 的
 Claude Desktop 用的轉接器、讀電腦本機檔案上傳成附件的 `add_attachment_from_path`，以及 skill 檔。
+
+AI 能讀寫 App 裡**所有**旅程，不只手機上開著的那一趟；從設定進來時，開著的那一趟只是 AI 沒指明哪一趟時的預設。
 
 手機端：**設定 › 用電腦 AI 編輯**，或**新增旅程 › 用電腦 AI 建立旅程**，打開「連接電腦 AI」頁，按「複製命令」貼到
 電腦上。手機和電腦要在同一個 Wi-Fi。頁面要一直開著：鎖屏或切到別的 App 會暫停，回來自動接上；關掉頁面就中斷，

@@ -1,13 +1,14 @@
 ---
 name: tripezgo
-description: Read and edit trips in the TripEZGo iPhone app through its MCP server — itinerary events and travel legs, to-dos, attachments, notes, shopping list, map markers, trip info, and creating new trips. Use when the user asks to plan, build, change or review a trip in TripEZGo.
+description: Read and edit any of the user's trips in the TripEZGo iPhone app through its MCP server — itinerary events and travel legs, to-dos, attachments, notes, shopping list, map markers, trip info, and creating new trips. Use when the user asks to plan, build, change or review a trip in TripEZGo.
 ---
 
 # TripEZGo
 
-TripEZGo is a travel-planning iPhone app: one trip at a time, a day-by-day calendar of events, travel legs
+TripEZGo is a travel-planning iPhone app: the phone shows one trip at a time, each with a day-by-day calendar of events, travel legs
 between events, and to-dos, files, notes, a shopping list and map markers attached to the trip. The `tripezgo`
-MCP server **is the app itself**, reachable only while the phone shows the "連接電腦 AI" (connect computer AI)
+MCP server **is the app itself** and reaches **all** of the user's trips, not only the one open on the phone. It is
+reachable only while the phone shows the "連接電腦 AI" (connect computer AI)
 page on the same Wi-Fi. If every call fails to connect, ask the user to open that page again and keep the app
 in the foreground.
 
@@ -15,8 +16,9 @@ in the foreground.
 
 ## Start here
 
-1. `list_trips` — see what exists. Calls without `tripId` go to the app's **default trip**: the one open on the
-   user's phone ("this trip" / "the current trip" means it). `create_trip` makes the new trip the default — and
+1. `list_trips` — see every trip. Calls without `tripId` go to the app's **default trip**: the one open on the
+   user's phone ("this trip" / "the current trip" means it). That is only a convenience — any tool works on any
+   trip you pass as `tripId`; when the user talks about another trip, find it in `list_trips`. `create_trip` makes the new trip the default — and
    the trip the phone shows — whichever way the user opened the page.
 2. Pick the trip with the user; pass its `tripId` explicitly from then on.
 3. `get_trip`, then `list_events` (optionally `from` / `to`) to see the itinerary and its legs before changing
