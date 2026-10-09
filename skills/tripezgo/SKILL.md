@@ -21,7 +21,8 @@ in the foreground.
    their phone; when they opened it from adding a new trip, there is no default — `create_trip` first or pass
    `tripId`. The default is only a convenience — any tool works on any trip you pass as `tripId`; when the user
    talks about another trip, find it in `list_trips`. `create_trip` makes the new trip the default — and the
-   trip the phone shows — whichever way the user opened the page.
+   trip the phone shows — whichever way the user opened the page. If there is no default trip, pass `tripId`
+   (or create a trip first).
 2. Pick the trip with the user; pass its `tripId` explicitly from then on.
 3. `get_trip`, then `list_events` (optionally `from` / `to`) to see the itinerary and its legs before changing
    anything.
