@@ -132,6 +132,12 @@ On older versions, add the marketplace first, then install:
 /plugin install tripezgo@tripezgo
 ```
 
+From a terminal instead (this is the line the app's link page copies; both steps are safe to re-run):
+
+```sh
+claude plugin marketplace add TripEZGo/mcp && claude plugin install tripezgo@tripezgo
+```
+
 The skill then shows up as `tripezgo:tripezgo`. Or skip the plugin and copy the folder yourself:
 
 ```sh
@@ -159,9 +165,10 @@ Codex reads skills in the same `SKILL.md` format from `$HOME/.agents/skills` (ev
 `.agents/skills` in a repository:
 
 ```sh
-git clone https://github.com/TripEZGo/mcp.git
-mkdir -p ~/.agents/skills && cp -R mcp/skills/tripezgo ~/.agents/skills/
+d=$(mktemp -d) && git clone --depth 1 https://github.com/TripEZGo/mcp.git "$d" && mkdir -p ~/.agents/skills && cp -R "$d/skills/tripezgo" ~/.agents/skills/
 ```
+
+(This is the line the app's link page copies; it clones into a temporary folder, so re-running it to update is safe.)
 
 See [Codex: Build skills](https://learn.chatgpt.com/docs/build-skills). If your Codex has no skills support, point
 `AGENTS.md` at the file instead — add a line such as
