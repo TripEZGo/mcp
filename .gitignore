@@ -1,0 +1,4 @@
+node_modules/
+*.log
+.DS_Store
+# dist/ is committed on purpose: `npx github:TripEZGo/mcp` runs it as-is, without a build step.

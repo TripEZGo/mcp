@@ -1,0 +1,37 @@
+{
+  "name": "tripezgo-mcp",
+  "version": "0.1.0",
+  "description": "stdio bridge and computer-side tools for the TripEZGo iPhone app's MCP server",
+  "license": "MIT",
+  "author": "TripEZGo",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/TripEZGo/mcp.git"
+  },
+  "type": "module",
+  "bin": {
+    "tripezgo-mcp": "dist/cli.js"
+  },
+  "files": [
+    "dist",
+    "skills",
+    "README.md",
+    "LICENSE"
+  ],
+  "engines": {
+    "node": ">=18"
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.build.json",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "test": "tsc -p tsconfig.build.json && vitest run"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "1.32.1"
+  },
+  "devDependencies": {
+    "@types/node": "20.19.43",
+    "typescript": "5.9.3",
+    "vitest": "4.1.11"
+  }
+}
