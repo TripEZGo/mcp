@@ -16,10 +16,12 @@ in the foreground.
 
 ## Start here
 
-1. `list_trips` — see every trip. Calls without `tripId` go to the app's **default trip**: the one open on the
-   user's phone ("this trip" / "the current trip" means it). That is only a convenience — any tool works on any
-   trip you pass as `tripId`; when the user talks about another trip, find it in `list_trips`. `create_trip` makes the new trip the default — and
-   the trip the phone shows — whichever way the user opened the page.
+1. `list_trips` — see every trip. Calls without `tripId` go to the app's **default trip** ("this trip" /
+   "the current trip" means it). When the user opened the link from Settings, the default is the trip open on
+   their phone; when they opened it from adding a new trip, there is no default — `create_trip` first or pass
+   `tripId`. The default is only a convenience — any tool works on any trip you pass as `tripId`; when the user
+   talks about another trip, find it in `list_trips`. `create_trip` makes the new trip the default — and the
+   trip the phone shows — whichever way the user opened the page.
 2. Pick the trip with the user; pass its `tripId` explicitly from then on.
 3. `get_trip`, then `list_events` (optionally `from` / `to`) to see the itinerary and its legs before changing
    anything.
