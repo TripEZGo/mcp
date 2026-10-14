@@ -1,7 +1,7 @@
 import { readFile, stat } from "node:fs/promises";
 import { homedir } from "node:os";
 import { basename, resolve } from "node:path";
-import type { CallToolResult, Tool } from "@modelcontextprotocol/sdk/types.js";
+import type { CallToolResult, Tool } from "./protocol.js";
 import { apiLevelMismatchMessage, unauthorizedMessage, unreachableMessage } from "./messages.js";
 import { mimeTypeFor } from "./mime.js";
 
@@ -55,6 +55,8 @@ export interface UploadOptions {
   timeoutMs?: number;
   /** The app's upload limit (from `initialize`); defaults to `DEFAULT_UPLOAD_LIMIT_BYTES`. */
   maxBytes?: number;
+  /** What to say on a 401; the connect-by-sentence bridge asks for a new sentence instead of a new command. */
+  unauthorizedMessage?: string;
 }
 
 export async function addAttachmentFromPath(args: unknown, options: UploadOptions): Promise<CallToolResult> {
@@ -113,7 +115,7 @@ export async function addAttachmentFromPath(args: unknown, options: UploadOption
   const json = parseObject(text);
 
   if (response.status === 409) return failure(apiLevelMismatchMessage(errorText(json)));
-  if (response.status === 401) return failure(unauthorizedMessage());
+  if (response.status === 401) return failure(options.unauthorizedMessage ?? unauthorizedMessage());
   if (!response.ok) {
     return failure(`The TripEZGo app refused the upload (HTTP ${response.status}): ${errorText(json) ?? (text.trim() || "no details")}`);
   }

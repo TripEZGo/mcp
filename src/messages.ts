@@ -21,8 +21,43 @@ export function apiLevelMismatchMessage(appMessage: string | undefined): string 
   return (
     "The TripEZGo app and this bridge (github:TripEZGo/mcp) speak different versions of the upload API" +
     (appMessage ? ` — the app says: ${appMessage}` : "") +
-    ". Update TripEZGo from the App Store and the bridge to the latest github:TripEZGo/mcp " +
-    "(restart the AI app so npx fetches it again), then try again."
+    ". Update TripEZGo from the App Store, and restart the AI app so the bridge updates itself " +
+    "(an install from before 0.2.0: run `npx -y github:TripEZGo/mcp install <claude-code|codex|claude-desktop>`), then try again."
+  );
+}
+
+/** Where the connect sentence comes from, and what it looks like. Said the same way everywhere. */
+export const CONNECT_HOWTO =
+  'Ask the user to open TripEZGo on their iPhone, go to the "Connect computer AI" page (連接電腦 AI — ' +
+  "Settings › 用電腦 AI 編輯, or New trip › 用電腦 AI 建立旅程), keep it open, and paste the connect sentence it " +
+  "shows; it looks like 「連接 TripEZGo：192.168.1.23:8765，金鑰 abc123」. Then call `connect` with the address " +
+  "and the key from that sentence.";
+
+export function notConnectedMessage(tool: string): string {
+  return `Not connected to the TripEZGo app yet, so ${tool} can't run. ${CONNECT_HOWTO} After that, call ${tool} again.`;
+}
+
+export function connectUnauthorizedMessage(): string {
+  return (
+    'The TripEZGo app rejected that key (HTTP 401). A key only works while the "Connect computer AI" page ' +
+    "that showed it stays open; reopening the page makes a new one. Ask the user to open the page and paste " +
+    "the connect sentence it shows now, then call `connect` again."
+  );
+}
+
+export function connectionLostMessage(status: number): string {
+  return (
+    `The TripEZGo app no longer accepts this connection (HTTP ${status}): the "Connect computer AI" page was ` +
+    "closed or reopened, and that ends the old key. Ask the user to open the page on the iPhone and paste " +
+    "the connect sentence it shows now, then call `connect` again."
+  );
+}
+
+export function unsupportedToolMessage(tool: string, appVersion: string | undefined): string {
+  return (
+    `The TripEZGo app on the iPhone${appVersion ? ` (version ${appVersion})` : ""} doesn't have ${tool} yet. ` +
+    'Ask the user to update TripEZGo from the App Store, reopen the "Connect computer AI" page, and paste ' +
+    "the new connect sentence; then call `connect` again and retry."
   );
 }
 

@@ -1,6 +1,6 @@
-import { ErrorCode } from "@modelcontextprotocol/sdk/types.js";
 import type { BridgeConfig } from "./config.js";
 import { unauthorizedMessage, unreachableMessage } from "./messages.js";
+import { ErrorCode, type Id, type Json, errorLine, hasCursor, hasId, isJsonRpc, isObject, sseData } from "./protocol.js";
 import { DEFAULT_UPLOAD_LIMIT_BYTES, LOCAL_TOOL_NAME, addAttachmentFromPath, localTool, uploadLimitFrom } from "./upload.js";
 
 export interface BridgeOptions extends BridgeConfig {
@@ -10,9 +10,6 @@ export interface BridgeOptions extends BridgeConfig {
   uploadTimeoutMs?: number;
   log?: (message: string) => void;
 }
-
-type Json = Record<string, unknown>;
-type Id = string | number | null;
 
 /**
  * Turns one stdio JSON-RPC line into the lines to write back.
@@ -132,43 +129,4 @@ export class Bridge {
 
     return /[\r\n]/.test(body) ? JSON.stringify(parsed) : body.trim();
   }
-}
-
-function errorLine(id: Id, code: number, message: string): string {
-  return JSON.stringify({ jsonrpc: "2.0", id, error: { code, message } });
-}
-
-function isObject(value: unknown): value is Json {
-  return !!value && typeof value === "object" && !Array.isArray(value);
-}
-
-function hasId(message: Json): boolean {
-  return "id" in message && message.id !== undefined;
-}
-
-function hasCursor(request: Json): boolean {
-  return isObject(request.params) && request.params.cursor !== undefined;
-}
-
-function isJsonRpc(body: string): boolean {
-  try {
-    const value: unknown = JSON.parse(body);
-    return Array.isArray(value) || (isObject(value) && value.jsonrpc === "2.0");
-  } catch {
-    return false;
-  }
-}
-
-/** `data:` payloads of a text/event-stream body. The app answers in JSON; this is only for robustness. */
-function sseData(text: string): string[] {
-  const out: string[] = [];
-  for (const event of text.split(/\r?\n\r?\n/)) {
-    const data = event
-      .split(/\r?\n/)
-      .filter((line) => line.startsWith("data:"))
-      .map((line) => line.slice(5).replace(/^ /, ""))
-      .join("\n");
-    if (data.trim() !== "") out.push(data);
-  }
-  return out;
 }

@@ -4,10 +4,15 @@ export interface BridgeConfig {
   token: string;
 }
 
-export const USAGE = `Usage: npx -y github:TripEZGo/mcp --url http://IP:PORT --token=TOKEN
-
-Both values are shown on the iPhone, on the TripEZGo "Connect computer AI" page.
-They can also come from the environment: TRIPEZGO_URL, TRIPEZGO_TOKEN.`;
+export const USAGE = `Usage:
+  npx -y github:TripEZGo/mcp install <claude-code|codex|claude-desktop>
+      Install the TripEZGo MCP server and planning skill once; it updates itself.
+  tripezgo-mcp
+      Run the bridge on stdio. The AI connects with the sentence the iPhone shows
+      (連接 TripEZGo：IP:PORT，金鑰 TOKEN) through the connect tool.
+  npx -y github:TripEZGo/mcp --url http://IP:PORT --token=TOKEN
+      Older app versions: bridge to one address and token, shown on the TripEZGo
+      "Connect computer AI" page. Also read from TRIPEZGO_URL, TRIPEZGO_TOKEN.`;
 
 export class ConfigError extends Error {}
 
@@ -18,8 +23,11 @@ function isKnownFlag(arg: string): boolean {
   return KNOWN_FLAGS.some((name) => arg === `--${name}` || arg.startsWith(`--${name}=`));
 }
 
-/** Reads `--url` / `--token` (flags win) or `TRIPEZGO_URL` / `TRIPEZGO_TOKEN`. */
-export function parseConfig(argv: readonly string[], env: Record<string, string | undefined>): BridgeConfig {
+/**
+ * Reads `--url` / `--token` (flags win) or `TRIPEZGO_URL` / `TRIPEZGO_TOKEN`. Neither anywhere → `undefined`:
+ * the bridge starts unconnected and the AI connects with the `connect` tool.
+ */
+export function parseConfig(argv: readonly string[], env: Record<string, string | undefined>): BridgeConfig | undefined {
   const flags = new Map<string, string>();
   const set = (name: string, value: string) => {
     // A second value would silently win over the first; say so instead.
@@ -53,6 +61,7 @@ export function parseConfig(argv: readonly string[], env: Record<string, string 
 
   const rawUrl = (flags.get("url") ?? env.TRIPEZGO_URL ?? "").trim();
   const token = (flags.get("token") ?? env.TRIPEZGO_TOKEN ?? "").trim();
+  if (!rawUrl && !token) return undefined;
   if (!rawUrl) throw new ConfigError("Missing --url (or TRIPEZGO_URL)");
   if (!token) throw new ConfigError("Missing --token (or TRIPEZGO_TOKEN)");
 

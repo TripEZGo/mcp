@@ -1,0 +1,199 @@
+import { execFile } from "node:child_process";
+import { randomBytes } from "node:crypto";
+import { existsSync } from "node:fs";
+import { mkdir, readdir, rename, rm, stat, writeFile } from "node:fs/promises";
+import { join } from "node:path";
+import { compareTags, parseTag, readInstallConfig, readMarker, replaceDir } from "./fsutil.js";
+
+/**
+ * What `~/.tripezgo/launcher.mjs` does on every start, before the bridge runs: find the newest release, cache
+ * it, refresh the installed skill folders. Every failure here falls back to what is already cached. Nothing
+ * is written to stdout: that is the MCP channel, and the bridge owns it.
+ */
+
+export const REPO = "TripEZGo/mcp";
+export const TAGS_URL = `https://api.github.com/repos/${REPO}/tags?per_page=100`;
+export const tarballUrl = (tag: string) => `https://codeload.github.com/${REPO}/tar.gz/refs/tags/${tag}`;
+/** The first release whose tarball runs without `npm install`. */
+export const MIN_TAG = "v0.2.0";
+/** The file that proves a cached version is complete. */
+export const ENTRY = join("dist", "cli.js");
+const KEEP_VERSIONS = 2;
+
+export interface LauncherDeps {
+  /** `~/.tripezgo`: `versions/`, `tmp/`, `config.json`. */
+  home: string;
+  fetch: typeof fetch;
+  log: (message: string) => void;
+  /** Extracts a .tar.gz into an existing folder. Defaults to the system `tar`. */
+  extract?: (archive: string, dest: string) => Promise<void>;
+  /** False skips the network (TRIPEZGO_NO_UPDATE=1). */
+  checkForUpdates?: boolean;
+  tagsTimeoutMs?: number;
+  downloadTimeoutMs?: number;
+}
+
+export interface PickedVersion {
+  tag: string;
+  dir: string;
+}
+
+export async function prepareVersion(deps: LauncherDeps): Promise<PickedVersion | undefined> {
+  const versions = join(deps.home, "versions");
+
+  if (deps.checkForUpdates !== false) {
+    const latest = await latestTag(deps);
+    if (latest && !isComplete(join(versions, latest))) {
+      try {
+        await download(deps, latest);
+        deps.log(`updated to ${latest}`);
+      } catch (error) {
+        deps.log(`couldn't download ${latest} (${describe(error)}); using the cached version`);
+      }
+    }
+  }
+
+  const cached = await cachedTags(versions);
+  if (cached.length === 0) return undefined;
+  const picked: PickedVersion = { tag: cached[0], dir: join(versions, cached[0]) };
+
+  for (const old of cached.slice(KEEP_VERSIONS)) {
+    await rm(join(versions, old), { recursive: true, force: true }).catch(() => undefined);
+  }
+  await sweepStaleTemp(join(deps.home, "tmp"));
+  await syncSkills(deps, picked);
+  return picked;
+}
+
+async function latestTag(deps: LauncherDeps): Promise<string | undefined> {
+  try {
+    const response = await deps.fetch(TAGS_URL, {
+      headers: { Accept: "application/vnd.github+json", "User-Agent": "tripezgo-launcher" },
+      signal: AbortSignal.timeout(deps.tagsTimeoutMs ?? 2_000),
+    });
+    if (!response.ok) {
+      deps.log(`update check: GitHub answered HTTP ${response.status}`);
+      return undefined;
+    }
+    const body: unknown = await response.json();
+    const tags = Array.isArray(body)
+      ? body
+          .map((entry) => (entry && typeof entry === "object" ? (entry as { name?: unknown }).name : undefined))
+          .filter((name): name is string => typeof name === "string" && !!parseTag(name) && compareTags(name, MIN_TAG) >= 0)
+      : [];
+    return tags.sort(compareTags).at(-1);
+  } catch (error) {
+    deps.log(`update check failed (${describe(error)}); using the cached version`);
+    return undefined;
+  }
+}
+
+/** Downloads and extracts beside the cache, then renames into place: a version folder is whole or absent. */
+async function download(deps: LauncherDeps, tag: string): Promise<void> {
+  const temp = join(deps.home, "tmp", `${tag}-${process.pid}-${randomBytes(4).toString("hex")}`);
+  try {
+    await mkdir(join(temp, "x"), { recursive: true });
+    const response = await deps.fetch(tarballUrl(tag), {
+      headers: { "User-Agent": "tripezgo-launcher" },
+      signal: AbortSignal.timeout(deps.downloadTimeoutMs ?? 20_000),
+    });
+    if (!response.ok) throw new Error(`HTTP ${response.status}`);
+    const archive = join(temp, "release.tar.gz");
+    await writeFile(archive, new Uint8Array(await response.arrayBuffer()));
+    await (deps.extract ?? systemTar)(archive, join(temp, "x"));
+
+    const tops = await readdir(join(temp, "x"));
+    if (tops.length !== 1) throw new Error("unexpected tarball layout");
+    const extracted = join(temp, "x", tops[0]);
+    if (!isComplete(extracted)) throw new Error(`the release has no ${ENTRY}`);
+
+    const target = join(deps.home, "versions", tag);
+    await mkdir(join(deps.home, "versions"), { recursive: true });
+    try {
+      await rename(extracted, target);
+    } catch (error) {
+      // Another client started at the same moment and won the race: its copy is as good as ours.
+      if (!isComplete(target)) throw error;
+    }
+  } finally {
+    await rm(temp, { recursive: true, force: true }).catch(() => undefined);
+  }
+}
+
+function systemTar(archive: string, dest: string): Promise<void> {
+  return new Promise((resolve, reject) => {
+    execFile("tar", ["-xzf", archive, "-C", dest], (error, _stdout, stderr) => {
+      if (error) reject(new Error(`tar: ${String(stderr).trim() || error.message}`));
+      else resolve();
+    });
+  });
+}
+
+/** Leftovers of a launcher that was killed mid-download. Recent ones may belong to a launcher running now. */
+async function sweepStaleTemp(tmp: string): Promise<void> {
+  let names: string[];
+  try {
+    names = await readdir(tmp);
+  } catch {
+    return;
+  }
+  const cutoff = Date.now() - 60 * 60 * 1000;
+  for (const name of names) {
+    try {
+      if ((await stat(join(tmp, name))).mtimeMs < cutoff) await rm(join(tmp, name), { recursive: true, force: true });
+    } catch {
+      // already gone
+    }
+  }
+}
+
+function isComplete(dir: string): boolean {
+  return existsSync(join(dir, ENTRY));
+}
+
+/** Complete cached versions, newest first. */
+async function cachedTags(versions: string): Promise<string[]> {
+  let names: string[];
+  try {
+    names = await readdir(versions);
+  } catch {
+    return [];
+  }
+  const complete: string[] = [];
+  for (const name of names) {
+    if (!parseTag(name)) continue;
+    try {
+      if ((await stat(join(versions, name))).isDirectory() && isComplete(join(versions, name))) complete.push(name);
+    } catch {
+      // vanished under us
+    }
+  }
+  return complete.sort(compareTags).reverse();
+}
+
+/** Each installed client's skill folder gets this version's `skills/tripezgo`, unless it already has it. */
+async function syncSkills(deps: LauncherDeps, picked: PickedVersion): Promise<void> {
+  const source = join(picked.dir, "skills", "tripezgo");
+  if (!existsSync(source)) return;
+  const config = await readInstallConfig(join(deps.home, "config.json"));
+  for (const [client, entry] of Object.entries(config.clients)) {
+    const skillDir = entry && typeof entry.skillDir === "string" ? entry.skillDir : undefined;
+    if (!skillDir) continue;
+    if ((await readMarker(skillDir)) === picked.tag) continue;
+    try {
+      await replaceDir(source, skillDir, picked.tag);
+      deps.log(`${client}: skill updated to ${picked.tag}`);
+    } catch (error) {
+      deps.log(`${client}: couldn't update the skill at ${skillDir} (${describe(error)})`);
+    }
+  }
+}
+
+function describe(error: unknown): string {
+  if (error instanceof Error) {
+    if (error.name === "TimeoutError" || error.name === "AbortError") return "timed out";
+    const cause = (error as Error & { cause?: { code?: unknown } }).cause;
+    return cause?.code ? `${error.message}: ${String(cause.code)}` : error.message;
+  }
+  return String(error);
+}
