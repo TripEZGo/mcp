@@ -1,3 +1,1357 @@
 {
-  "tools": []
+  "tools": [
+    {
+      "description": "List the user's trips (not the ones in the bin), with their dates, main place, time zone and whether you may change their contents (canEditContent: events, legs, to-dos, shopping, markers, attachments, notes) and the trip's own details (canEditTripInfo: name, dates, main place, time zone). Also tells you which trip is the default for this link.",
+      "inputSchema": {
+        "properties": {},
+        "type": "object"
+      },
+      "name": "list_trips"
+    },
+    {
+      "description": "Read one trip: name, dates (or day count when undecided), main place, time zone, and whether you may change its contents (canEditContent) and its own details (canEditTripInfo). Leave tripId out to read the default trip.",
+      "inputSchema": {
+        "properties": {
+          "tripId": {
+            "description": "Trip id from list_trips. Optional.",
+            "type": "string"
+          }
+        },
+        "type": "object"
+      },
+      "name": "get_trip"
+    },
+    {
+      "description": "Find a trip's main place: a city, region or island area (not a shop or an address). Returns candidates with a placeId, a name, a detail line (region and country) and the place's time zone. Pass the placeId to create_trip or update_trip. Places that span several time zones (a whole large country) are not offered; pick a city in it instead.",
+      "inputSchema": {
+        "properties": {
+          "query": {
+            "description": "What to look for, e.g. \"Kyoto\" or \"Okinawa\".",
+            "type": "string"
+          }
+        },
+        "required": [
+          "query"
+        ],
+        "type": "object"
+      },
+      "name": "search_trip_place"
+    },
+    {
+      "description": "Create a new trip. Give it a name and either startDate + endDate (YYYY-MM-DD) or, when the dates are not decided yet, dayCount (1-300). A trip lasts 1 to 300 days. Optionally set its main place (placeId from search_trip_place, or placeName to take the first match) and its time zone (by default it follows the main place, or the phone when there is no place). The new trip becomes the default for calls without tripId, and the trip the phone shows. The free plan holds 3 trips; when they are used up this fails and the user has to upgrade to Premium in the app on their phone.",
+      "inputSchema": {
+        "properties": {
+          "dayCount": {
+            "description": "Number of days when the dates are undecided. Instead of startDate/endDate.",
+            "maximum": 300,
+            "minimum": 1,
+            "type": "integer"
+          },
+          "endDate": {
+            "description": "Last day, YYYY-MM-DD. Pass with startDate.",
+            "type": "string"
+          },
+          "name": {
+            "description": "Trip name.",
+            "type": "string"
+          },
+          "placeId": {
+            "description": "Main place: a placeId from search_trip_place.",
+            "type": "string"
+          },
+          "placeName": {
+            "description": "Main place by name: the first search_trip_place match is used. Instead of placeId.",
+            "type": "string"
+          },
+          "startDate": {
+            "description": "First day, YYYY-MM-DD. Pass with endDate.",
+            "type": "string"
+          },
+          "timeZone": {
+            "description": "The trip's time zone.",
+            "properties": {
+              "mode": {
+                "enum": [
+                  "followPlace",
+                  "followPhone",
+                  "custom"
+                ],
+                "type": "string"
+              },
+              "timeZone": {
+                "description": "IANA identifier such as Asia/Tokyo. Only with mode custom. The app offers one zone per UTC offset (Seoul is Asia/Tokyo); a wrong one is refused with the list.",
+                "type": "string"
+              }
+            },
+            "required": [
+              "mode"
+            ],
+            "type": "object"
+          }
+        },
+        "required": [
+          "name"
+        ],
+        "type": "object"
+      },
+      "name": "create_trip"
+    },
+    {
+      "description": "Change a trip's name, schedule, main place or time zone. Pass only what changes; fields equal to what the trip already has are left alone. Leave tripId out for the default trip. Schedule: startDate + endDate (YYYY-MM-DD), or dayCount (1-300) for undecided dates. Events are kept by day number, not by date: moving the start from Jul 1 to Jul 3 moves day 1's events to Jul 3. Shortening a trip deletes nothing; events on the days beyond the new end are hidden and come back if the trip is made longer again. The result's hiddenEventCount is how many events this change hid and reappearedEventCount how many hidden ones it brought back (0 when the day count did not change). When hiddenEventCount is above 0, always tell the user: those events are not deleted, the phone no longer shows them in the trip or the overview, they are listed under Settings > Itinerary > Hidden days, and making the trip longer again brings them back; list_events marks them hiddenBeyondTripEnd. Main place: placeId from search_trip_place, placeName to take the first match, or clearPlace: true. Time zone: mode followPlace (the main place's zone; needs a place with one time zone), followPhone (always the phone's current zone) or custom with an IANA timeZone such as Asia/Tokyo. Changing the time zone moves no event. Only the trip's owner may change these: a trip shared with the user by someone else, and the demo trip, are refused.",
+      "inputSchema": {
+        "properties": {
+          "clearPlace": {
+            "description": "true removes the trip's main place.",
+            "type": "boolean"
+          },
+          "dayCount": {
+            "description": "Number of days when the dates are undecided. Instead of startDate/endDate.",
+            "maximum": 300,
+            "minimum": 1,
+            "type": "integer"
+          },
+          "endDate": {
+            "description": "Last day, YYYY-MM-DD. Pass with startDate.",
+            "type": "string"
+          },
+          "name": {
+            "description": "New trip name.",
+            "type": "string"
+          },
+          "placeId": {
+            "description": "Main place: a placeId from search_trip_place.",
+            "type": "string"
+          },
+          "placeName": {
+            "description": "Main place by name: the first search_trip_place match is used. Instead of placeId.",
+            "type": "string"
+          },
+          "startDate": {
+            "description": "First day, YYYY-MM-DD. Pass with endDate.",
+            "type": "string"
+          },
+          "timeZone": {
+            "description": "The trip's time zone.",
+            "properties": {
+              "mode": {
+                "enum": [
+                  "followPlace",
+                  "followPhone",
+                  "custom"
+                ],
+                "type": "string"
+              },
+              "timeZone": {
+                "description": "IANA identifier such as Asia/Tokyo. Only with mode custom. The app offers one zone per UTC offset (Seoul is Asia/Tokyo); a wrong one is refused with the list.",
+                "type": "string"
+              }
+            },
+            "required": [
+              "mode"
+            ],
+            "type": "object"
+          },
+          "tripId": {
+            "description": "Trip id from list_trips. Optional.",
+            "type": "string"
+          }
+        },
+        "type": "object"
+      },
+      "name": "update_trip"
+    },
+    {
+      "description": "List a trip's events (the itinerary), day by day, with the leg (how you travel there) into each one. Times are HH:mm in the trip's time zone, as the app shows them; an event recorded in another time zone (a flight) also carries its own recorded times. Leave tripId out for the default trip. from / to (YYYY-MM-DD, inclusive) narrow it to those dates; unscheduled events without a day are only listed when neither is given. Each event has: id, title, type, kind (timed, allDay or unscheduled), date and dayNumber (day 1 is the first day), startTime/endTime with a dayOffset when they fall on another calendar day, place, notes, cancelled, todoCount, attachmentCount, leg (into this event: fromEventId, mode, minutes, note…) and closingLeg (from this event to the day's closing all-day event).",
+      "inputSchema": {
+        "properties": {
+          "from": {
+            "description": "First date to list, YYYY-MM-DD. Optional.",
+            "type": "string"
+          },
+          "to": {
+            "description": "Last date to list, YYYY-MM-DD. Optional.",
+            "type": "string"
+          },
+          "tripId": {
+            "description": "Trip id from list_trips. Optional.",
+            "type": "string"
+          }
+        },
+        "type": "object"
+      },
+      "name": "list_events"
+    },
+    {
+      "description": "Find a place for an event or a custom map marker: a shop, a sight, a station, a hotel or an address (a trip's main place comes from search_trip_place instead). Uses the same search as the app's event form. By default it looks around the trip's main place; pass near (latitude/longitude, e.g. the previous event's place) to look around there instead. Returns candidates with a placeId, name, address, coordinates and suggestedType (the event type the app would pick for it when the event is titled with the place's name). Pass the placeId to create_event, update_event, create_marker or update_marker; placeIds last for this link only. If the candidates look unrelated, retry with the place's English or local-language name.",
+      "inputSchema": {
+        "properties": {
+          "near": {
+            "description": "Look around this point instead of the trip's main place.",
+            "properties": {
+              "latitude": {
+                "type": "number"
+              },
+              "longitude": {
+                "type": "number"
+              }
+            },
+            "required": [
+              "latitude",
+              "longitude"
+            ],
+            "type": "object"
+          },
+          "query": {
+            "description": "What to look for, e.g. \"Kiyomizu-dera\" or an address.",
+            "type": "string"
+          },
+          "tripId": {
+            "description": "Trip id whose main place the search leans towards. Optional.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "query"
+        ],
+        "type": "object"
+      },
+      "name": "search_place"
+    },
+    {
+      "description": "Add an event to a trip's itinerary. Leave tripId out for the default trip. Kinds: a timed event (date or dayNumber, startTime, and endTime or durationMinutes; one hour by default), an all-day event (allDay: true, date or dayNumber, and endDate/endDayNumber for a span of days), or an unscheduled event (unscheduled: true; optional durationMinutes, optional day it belongs to). Day 1 is the trip's first day; a trip with undecided dates only takes dayNumber. Days must be inside the trip, as in the app's form. Times are HH:mm in the trip's time zone unless you pass eventTimeZone / endTimeZone (IANA), which records the event in that zone and reads the times there (a flight leaving Taipei and landing in Tokyo: eventTimeZone Asia/Taipei, endTimeZone Asia/Tokyo). An event that ends after midnight takes endDate/endDayNumber. Place: placeId from search_place (also fills the title and the type when you leave them out), or placeName for a name only (an address-looking name is located on the map, like typing it in the app). Leave type out and the app picks one from the title as its form does: the type it is sure of, else the place's category, else other (a title other than the place's name can differ from search_place's suggestedType; pass type to be sure).",
+      "inputSchema": {
+        "properties": {
+          "allDay": {
+            "description": "true: an all-day event over one or more days.",
+            "type": "boolean"
+          },
+          "date": {
+            "description": "The day it is on, YYYY-MM-DD. Or dayNumber.",
+            "type": "string"
+          },
+          "dayNumber": {
+            "description": "The day it is on; day 1 is the trip's first day. Or date.",
+            "minimum": 1,
+            "type": "integer"
+          },
+          "durationMinutes": {
+            "description": "How long it takes: the length of a timed event (instead of endTime), or of an unscheduled one.",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "endDate": {
+            "description": "Last day of an all-day event, or the day a timed event ends on when it ends after midnight. YYYY-MM-DD.",
+            "type": "string"
+          },
+          "endDayNumber": {
+            "description": "Same as endDate, as a day number.",
+            "minimum": 1,
+            "type": "integer"
+          },
+          "endTime": {
+            "description": "HH:mm, 24-hour. Or durationMinutes.",
+            "type": "string"
+          },
+          "endTimeZone": {
+            "description": "IANA time zone of the end, when it differs from the start (a flight).",
+            "type": "string"
+          },
+          "eventTimeZone": {
+            "description": "IANA time zone the event is recorded in (default: the trip's). startTime/endTime are then read in it.",
+            "type": "string"
+          },
+          "notes": {
+            "description": "Notes: booking numbers, reminders. Empty string clears them.",
+            "type": "string"
+          },
+          "placeId": {
+            "description": "A placeId from search_place.",
+            "type": "string"
+          },
+          "placeName": {
+            "description": "A place by name only, as typed in the app. Instead of placeId.",
+            "type": "string"
+          },
+          "startTime": {
+            "description": "HH:mm, 24-hour.",
+            "type": "string"
+          },
+          "title": {
+            "description": "Event title.",
+            "type": "string"
+          },
+          "tripId": {
+            "description": "Trip id from list_trips. Optional.",
+            "type": "string"
+          },
+          "type": {
+            "description": "Event type. sight, dining, transport, lodging and other are the broad ones.",
+            "enum": [
+              "sight",
+              "dining",
+              "transport",
+              "lodging",
+              "other",
+              "flight",
+              "airport",
+              "train",
+              "hsr",
+              "metro",
+              "bus",
+              "station",
+              "taxi",
+              "driving",
+              "carrental",
+              "fuel",
+              "chargingstation",
+              "parking",
+              "ferry",
+              "harbor",
+              "cycling",
+              "cablecar",
+              "hotel",
+              "guesthouse",
+              "camping",
+              "cafe",
+              "bar",
+              "dessert",
+              "market",
+              "fastfood",
+              "bakery",
+              "museum",
+              "artgallery",
+              "temple",
+              "castle",
+              "park",
+              "mountain",
+              "beach",
+              "waterfall",
+              "onsen",
+              "aquarium",
+              "zoo",
+              "viewpoint",
+              "diving",
+              "shopping",
+              "conveniencestore",
+              "souvenir",
+              "show",
+              "hospital",
+              "pharmacy",
+              "bank",
+              "postoffice",
+              "police",
+              "touristinfo",
+              "restroom",
+              "laundry"
+            ],
+            "type": "string"
+          },
+          "unscheduled": {
+            "description": "true: no day or time decided yet (a day it belongs to is optional).",
+            "type": "boolean"
+          }
+        },
+        "type": "object"
+      },
+      "name": "create_event"
+    },
+    {
+      "description": "Change an event. Pass eventId and only what changes; everything else stays as it is, and a call that changes nothing writes nothing. Same fields as create_event, plus clearPlace: true to remove the place and cancelled (true marks \"not going\": it stays on the calendar struck through and leaves the route; false brings it back). Times you pass are read in the trip's time zone unless you pass eventTimeZone / endTimeZone. Moving to another date keeps its times. Switch kinds with allDay or unscheduled (true or false). Its leg and closing leg stay; change those with set_leg / clear_leg.",
+      "inputSchema": {
+        "properties": {
+          "allDay": {
+            "description": "true: an all-day event over one or more days.",
+            "type": "boolean"
+          },
+          "cancelled": {
+            "description": "true: not going (reversible). false: going again.",
+            "type": "boolean"
+          },
+          "clearPlace": {
+            "description": "true removes the event's place.",
+            "type": "boolean"
+          },
+          "date": {
+            "description": "The day it is on, YYYY-MM-DD. Or dayNumber.",
+            "type": "string"
+          },
+          "dayNumber": {
+            "description": "The day it is on; day 1 is the trip's first day. Or date.",
+            "minimum": 1,
+            "type": "integer"
+          },
+          "durationMinutes": {
+            "description": "How long it takes: the length of a timed event (instead of endTime), or of an unscheduled one.",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "endDate": {
+            "description": "Last day of an all-day event, or the day a timed event ends on when it ends after midnight. YYYY-MM-DD.",
+            "type": "string"
+          },
+          "endDayNumber": {
+            "description": "Same as endDate, as a day number.",
+            "minimum": 1,
+            "type": "integer"
+          },
+          "endTime": {
+            "description": "HH:mm, 24-hour. Or durationMinutes.",
+            "type": "string"
+          },
+          "endTimeZone": {
+            "description": "IANA time zone of the end, when it differs from the start (a flight).",
+            "type": "string"
+          },
+          "eventId": {
+            "description": "Event id from list_events.",
+            "type": "string"
+          },
+          "eventTimeZone": {
+            "description": "IANA time zone the event is recorded in (default: the trip's). startTime/endTime are then read in it.",
+            "type": "string"
+          },
+          "notes": {
+            "description": "Notes: booking numbers, reminders. Empty string clears them.",
+            "type": "string"
+          },
+          "placeId": {
+            "description": "A placeId from search_place.",
+            "type": "string"
+          },
+          "placeName": {
+            "description": "A place by name only, as typed in the app. Instead of placeId.",
+            "type": "string"
+          },
+          "startTime": {
+            "description": "HH:mm, 24-hour.",
+            "type": "string"
+          },
+          "title": {
+            "description": "Event title.",
+            "type": "string"
+          },
+          "tripId": {
+            "description": "Trip id from list_trips. Optional.",
+            "type": "string"
+          },
+          "type": {
+            "description": "Event type. sight, dining, transport, lodging and other are the broad ones.",
+            "enum": [
+              "sight",
+              "dining",
+              "transport",
+              "lodging",
+              "other",
+              "flight",
+              "airport",
+              "train",
+              "hsr",
+              "metro",
+              "bus",
+              "station",
+              "taxi",
+              "driving",
+              "carrental",
+              "fuel",
+              "chargingstation",
+              "parking",
+              "ferry",
+              "harbor",
+              "cycling",
+              "cablecar",
+              "hotel",
+              "guesthouse",
+              "camping",
+              "cafe",
+              "bar",
+              "dessert",
+              "market",
+              "fastfood",
+              "bakery",
+              "museum",
+              "artgallery",
+              "temple",
+              "castle",
+              "park",
+              "mountain",
+              "beach",
+              "waterfall",
+              "onsen",
+              "aquarium",
+              "zoo",
+              "viewpoint",
+              "diving",
+              "shopping",
+              "conveniencestore",
+              "souvenir",
+              "show",
+              "hospital",
+              "pharmacy",
+              "bank",
+              "postoffice",
+              "police",
+              "touristinfo",
+              "restroom",
+              "laundry"
+            ],
+            "type": "string"
+          },
+          "unscheduled": {
+            "description": "true: no day or time decided yet (a day it belongs to is optional).",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "eventId"
+        ],
+        "type": "object"
+      },
+      "name": "update_event"
+    },
+    {
+      "description": "Delete an event, with its to-dos and attachments, and clear the leg of the event after it that started from it. This cannot be undone from here. To keep it but mark \"not going\", use update_event with cancelled: true instead.",
+      "inputSchema": {
+        "properties": {
+          "eventId": {
+            "description": "Event id from list_events.",
+            "type": "string"
+          },
+          "tripId": {
+            "description": "Trip id from list_trips. Optional.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "eventId"
+        ],
+        "type": "object"
+      },
+      "name": "delete_event"
+    },
+    {
+      "description": "Set how the traveller gets to an event: the leg into eventId (the event you travel TO). It starts from the event before it on the same day, or from fromEventId when you pass one (needed for an all-day event, e.g. the day's closing hotel). Pass only what changes; the rest of an existing leg stays. mode: idle (free time, not travelling), walking, driving, cycling, transit or other. transitKind (bus, train, ferry, airplane) and runs (scheduled departures) only apply to transit; avoidsHighways only to driving. durationMinutes is the travel time the user knows (0 clears it and it reads back as null; the app estimates one from the map otherwise). routeUrl must be an http(s) link.",
+      "inputSchema": {
+        "properties": {
+          "avoidsHighways": {
+            "description": "Driving only.",
+            "type": "boolean"
+          },
+          "durationMinutes": {
+            "description": "Travel time in minutes.",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "eventId": {
+            "description": "The event you travel to (from list_events).",
+            "type": "string"
+          },
+          "fromEventId": {
+            "description": "The event you leave from. Optional.",
+            "type": "string"
+          },
+          "mode": {
+            "enum": [
+              "idle",
+              "walking",
+              "driving",
+              "cycling",
+              "transit",
+              "other"
+            ],
+            "type": "string"
+          },
+          "note": {
+            "description": "e.g. \"take the 8:15 one\". Empty string clears it.",
+            "type": "string"
+          },
+          "routeUrl": {
+            "description": "A route page (http/https). Empty string clears it.",
+            "type": "string"
+          },
+          "runs": {
+            "description": "Transit departures to choose from. Replaces the existing list.",
+            "items": {
+              "properties": {
+                "arrivalTime": {
+                  "description": "HH:mm",
+                  "type": "string"
+                },
+                "arrivalTimeZone": {
+                  "description": "IANA.",
+                  "type": "string"
+                },
+                "departureTime": {
+                  "description": "HH:mm",
+                  "type": "string"
+                },
+                "departureTimeZone": {
+                  "description": "IANA, when the ends differ (flights).",
+                  "type": "string"
+                },
+                "name": {
+                  "description": "e.g. \"Skyliner 11\".",
+                  "type": "string"
+                }
+              },
+              "type": "object"
+            },
+            "type": "array"
+          },
+          "selectedRunIndex": {
+            "description": "Which run in runs is the one to take.",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "transitKind": {
+            "enum": [
+              "bus",
+              "train",
+              "ferry",
+              "airplane"
+            ],
+            "type": "string"
+          },
+          "tripId": {
+            "description": "Trip id from list_trips. Optional.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "eventId"
+        ],
+        "type": "object"
+      },
+      "name": "set_leg"
+    },
+    {
+      "description": "Remove the leg into eventId (how the traveller gets there). For the leg into the day's closing all-day event, pass fromEventId too. The events stay.",
+      "inputSchema": {
+        "properties": {
+          "eventId": {
+            "description": "The event you travel to (from list_events).",
+            "type": "string"
+          },
+          "fromEventId": {
+            "description": "The event you leave from. Optional.",
+            "type": "string"
+          },
+          "tripId": {
+            "description": "Trip id from list_trips. Optional.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "eventId"
+        ],
+        "type": "object"
+      },
+      "name": "clear_leg"
+    },
+    {
+      "description": "List a trip's to-dos. A to-do is either on an event (eventId) or an \"important\" one that belongs to the whole trip (eventId null, shown on the trip's overview). Leave tripId out for the default trip; pass eventId to list only that event's to-dos.",
+      "inputSchema": {
+        "properties": {
+          "eventId": {
+            "description": "Only this event's to-dos. Optional.",
+            "type": "string"
+          },
+          "tripId": {
+            "description": "Trip id from list_trips. Optional.",
+            "type": "string"
+          }
+        },
+        "type": "object"
+      },
+      "name": "list_todos"
+    },
+    {
+      "description": "Add a to-do. With eventId it goes on that event; without, it is an important to-do of the whole trip. It is added at the end of its list, not done unless done: true.",
+      "inputSchema": {
+        "properties": {
+          "done": {
+            "description": "Already done. Default false.",
+            "type": "boolean"
+          },
+          "eventId": {
+            "description": "Event id from list_events. Leave out for an important to-do.",
+            "type": "string"
+          },
+          "title": {
+            "description": "What to do.",
+            "type": "string"
+          },
+          "tripId": {
+            "description": "Trip id from list_trips. Optional.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "title"
+        ],
+        "type": "object"
+      },
+      "name": "create_todo"
+    },
+    {
+      "description": "Change a to-do's text or tick it done / not done. Only what you pass changes; passing what it already has writes nothing.",
+      "inputSchema": {
+        "properties": {
+          "done": {
+            "description": "Done or not.",
+            "type": "boolean"
+          },
+          "title": {
+            "description": "New text.",
+            "type": "string"
+          },
+          "todoId": {
+            "description": "To-do id from list_todos.",
+            "type": "string"
+          },
+          "tripId": {
+            "description": "Trip id from list_trips. Optional.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "todoId"
+        ],
+        "type": "object"
+      },
+      "name": "update_todo"
+    },
+    {
+      "description": "Delete a to-do. This cannot be undone from here.",
+      "inputSchema": {
+        "properties": {
+          "todoId": {
+            "description": "To-do id from list_todos.",
+            "type": "string"
+          },
+          "tripId": {
+            "description": "Trip id from list_trips. Optional.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "todoId"
+        ],
+        "type": "object"
+      },
+      "name": "delete_todo"
+    },
+    {
+      "description": "List a trip's shopping list: each item's name, notes, reference price and currency, categories, status (pending / bought / skipped), what was paid, whether it is private, the events it can be bought at, and its price-comparison quotes. Leave tripId out for the default trip.",
+      "inputSchema": {
+        "properties": {
+          "tripId": {
+            "description": "Trip id from list_trips. Optional.",
+            "type": "string"
+          }
+        },
+        "type": "object"
+      },
+      "name": "list_shopping_items"
+    },
+    {
+      "description": "Add an item to a trip's shopping list. It is added at the end, private and not bought yet unless you say otherwise. A price without a currency uses the currency the user picked in the app.",
+      "inputSchema": {
+        "properties": {
+          "categories": {
+            "description": "Categories, in order. An item can have several.",
+            "items": {
+              "enum": [
+                "drugstore",
+                "clothing",
+                "souvenir",
+                "food",
+                "luxury",
+                "electronics",
+                "goods",
+                "other"
+              ],
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "currency": {
+            "description": "ISO 4217 code of the price, e.g. JPY. Default: the currency the user picked in the app.",
+            "type": "string"
+          },
+          "detail": {
+            "description": "Notes: where to buy it, which branch, what to look out for.",
+            "type": "string"
+          },
+          "eventIds": {
+            "description": "Events (from list_events) where it can be bought.",
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "paidCurrency": {
+            "description": "ISO 4217 code of paidPrice when it differs from the price's currency.",
+            "type": "string"
+          },
+          "paidPrice": {
+            "description": "What was actually paid. Only on a bought item.",
+            "minimum": 0,
+            "type": "number"
+          },
+          "price": {
+            "description": "Reference price.",
+            "minimum": 0,
+            "type": "number"
+          },
+          "private": {
+            "description": "Only matters on a shared trip: private items are not shown to the others. New items are private.",
+            "type": "boolean"
+          },
+          "status": {
+            "description": "pending: still to buy; skipped: decided not to buy.",
+            "enum": [
+              "pending",
+              "bought",
+              "skipped"
+            ],
+            "type": "string"
+          },
+          "title": {
+            "description": "Item name.",
+            "type": "string"
+          },
+          "tripId": {
+            "description": "Trip id from list_trips. Optional.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "title"
+        ],
+        "type": "object"
+      },
+      "name": "create_shopping_item"
+    },
+    {
+      "description": "Change a shopping item. Only what you pass changes; null clears price, currency, detail or paidPrice; categories and eventIds replace the whole list. Moving it off \"bought\" clears what was paid. Passing what it already has writes nothing. Quotes and photos are only changed in the app.",
+      "inputSchema": {
+        "properties": {
+          "categories": {
+            "description": "Categories, in order. An item can have several.",
+            "items": {
+              "enum": [
+                "drugstore",
+                "clothing",
+                "souvenir",
+                "food",
+                "luxury",
+                "electronics",
+                "goods",
+                "other"
+              ],
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "currency": {
+            "description": "ISO 4217 code of the price, e.g. JPY. Default: the currency the user picked in the app.",
+            "type": "string"
+          },
+          "detail": {
+            "description": "Notes: where to buy it, which branch, what to look out for.",
+            "type": "string"
+          },
+          "eventIds": {
+            "description": "Events (from list_events) where it can be bought.",
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "itemId": {
+            "description": "Item id from list_shopping_items.",
+            "type": "string"
+          },
+          "paidCurrency": {
+            "description": "ISO 4217 code of paidPrice when it differs from the price's currency.",
+            "type": "string"
+          },
+          "paidPrice": {
+            "description": "What was actually paid. Only on a bought item.",
+            "minimum": 0,
+            "type": "number"
+          },
+          "price": {
+            "description": "Reference price.",
+            "minimum": 0,
+            "type": "number"
+          },
+          "private": {
+            "description": "Only matters on a shared trip: private items are not shown to the others. New items are private.",
+            "type": "boolean"
+          },
+          "status": {
+            "description": "pending: still to buy; skipped: decided not to buy.",
+            "enum": [
+              "pending",
+              "bought",
+              "skipped"
+            ],
+            "type": "string"
+          },
+          "title": {
+            "description": "Item name.",
+            "type": "string"
+          },
+          "tripId": {
+            "description": "Trip id from list_trips. Optional.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "itemId"
+        ],
+        "type": "object"
+      },
+      "name": "update_shopping_item"
+    },
+    {
+      "description": "Delete a shopping item with its photos and quotes. This cannot be undone from here. To keep it but not buy it, set status skipped instead.",
+      "inputSchema": {
+        "properties": {
+          "itemId": {
+            "description": "Item id from list_shopping_items.",
+            "type": "string"
+          },
+          "tripId": {
+            "description": "Trip id from list_trips. Optional.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "itemId"
+        ],
+        "type": "object"
+      },
+      "name": "delete_shopping_item"
+    },
+    {
+      "description": "List a trip's custom map markers: places the user wants to go to but has not put on a day yet. Each has a name, a point, an optional type and notes. Leave tripId out for the default trip.",
+      "inputSchema": {
+        "properties": {
+          "tripId": {
+            "description": "Trip id from list_trips. Optional.",
+            "type": "string"
+          }
+        },
+        "type": "object"
+      },
+      "name": "list_markers"
+    },
+    {
+      "description": "Put a custom marker on the trip's map. It needs a point: pass placeId from search_place (its point and name are used), or latitude and longitude. A name alone is not enough — call search_place first. name overrides the place's name.",
+      "inputSchema": {
+        "properties": {
+          "latitude": {
+            "description": "With longitude, instead of placeId.",
+            "maximum": 90,
+            "minimum": -90,
+            "type": "number"
+          },
+          "longitude": {
+            "description": "With latitude, instead of placeId.",
+            "maximum": 180,
+            "minimum": -180,
+            "type": "number"
+          },
+          "name": {
+            "description": "Marker name. Default: the place's name.",
+            "type": "string"
+          },
+          "notes": {
+            "description": "Notes, e.g. \"book ahead\", \"closed on Tuesdays\".",
+            "type": "string"
+          },
+          "placeId": {
+            "description": "A placeId from search_place.",
+            "type": "string"
+          },
+          "tripId": {
+            "description": "Trip id from list_trips. Optional.",
+            "type": "string"
+          },
+          "type": {
+            "description": "What kind of place it is (the same types as events).",
+            "enum": [
+              "sight",
+              "dining",
+              "transport",
+              "lodging",
+              "other",
+              "flight",
+              "airport",
+              "train",
+              "hsr",
+              "metro",
+              "bus",
+              "station",
+              "taxi",
+              "driving",
+              "carrental",
+              "fuel",
+              "chargingstation",
+              "parking",
+              "ferry",
+              "harbor",
+              "cycling",
+              "cablecar",
+              "hotel",
+              "guesthouse",
+              "camping",
+              "cafe",
+              "bar",
+              "dessert",
+              "market",
+              "fastfood",
+              "bakery",
+              "museum",
+              "artgallery",
+              "temple",
+              "castle",
+              "park",
+              "mountain",
+              "beach",
+              "waterfall",
+              "onsen",
+              "aquarium",
+              "zoo",
+              "viewpoint",
+              "diving",
+              "shopping",
+              "conveniencestore",
+              "souvenir",
+              "show",
+              "hospital",
+              "pharmacy",
+              "bank",
+              "postoffice",
+              "police",
+              "touristinfo",
+              "restroom",
+              "laundry"
+            ],
+            "type": "string"
+          }
+        },
+        "required": [],
+        "type": "object"
+      },
+      "name": "create_marker"
+    },
+    {
+      "description": "Change a custom marker. Only what you pass changes; null clears type or notes. To move it, pass a new placeId from search_place (its name is kept unless you pass name). Passing what it already has writes nothing.",
+      "inputSchema": {
+        "properties": {
+          "markerId": {
+            "description": "Marker id from list_markers.",
+            "type": "string"
+          },
+          "name": {
+            "description": "Marker name. Default: the place's name.",
+            "type": "string"
+          },
+          "notes": {
+            "description": "Notes, e.g. \"book ahead\", \"closed on Tuesdays\".",
+            "type": "string"
+          },
+          "placeId": {
+            "description": "A placeId from search_place.",
+            "type": "string"
+          },
+          "tripId": {
+            "description": "Trip id from list_trips. Optional.",
+            "type": "string"
+          },
+          "type": {
+            "description": "What kind of place it is (the same types as events).",
+            "enum": [
+              "sight",
+              "dining",
+              "transport",
+              "lodging",
+              "other",
+              "flight",
+              "airport",
+              "train",
+              "hsr",
+              "metro",
+              "bus",
+              "station",
+              "taxi",
+              "driving",
+              "carrental",
+              "fuel",
+              "chargingstation",
+              "parking",
+              "ferry",
+              "harbor",
+              "cycling",
+              "cablecar",
+              "hotel",
+              "guesthouse",
+              "camping",
+              "cafe",
+              "bar",
+              "dessert",
+              "market",
+              "fastfood",
+              "bakery",
+              "museum",
+              "artgallery",
+              "temple",
+              "castle",
+              "park",
+              "mountain",
+              "beach",
+              "waterfall",
+              "onsen",
+              "aquarium",
+              "zoo",
+              "viewpoint",
+              "diving",
+              "shopping",
+              "conveniencestore",
+              "souvenir",
+              "show",
+              "hospital",
+              "pharmacy",
+              "bank",
+              "postoffice",
+              "police",
+              "touristinfo",
+              "restroom",
+              "laundry"
+            ],
+            "type": "string"
+          }
+        },
+        "required": [
+          "markerId"
+        ],
+        "type": "object"
+      },
+      "name": "update_marker"
+    },
+    {
+      "description": "Delete a custom marker from the trip's map. This cannot be undone from here.",
+      "inputSchema": {
+        "properties": {
+          "markerId": {
+            "description": "Marker id from list_markers.",
+            "type": "string"
+          },
+          "tripId": {
+            "description": "Trip id from list_trips. Optional.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "markerId"
+        ],
+        "type": "object"
+      },
+      "name": "delete_marker"
+    },
+    {
+      "description": "List a trip's attachments (files and links). One attachment can hang in several places, so the same id can appear on several rows; \"attachedTo\" says where each row hangs: the trip itself (\"trip\", shown as the trip's important attachments), an event (\"event\"), or the leg into an event (\"leg\", with the event travelled from). Important ones come first, then by the itinerary. Pass eventId to list only what hangs on that event and on the leg into it.",
+      "inputSchema": {
+        "properties": {
+          "eventId": {
+            "description": "Only this event's attachments. Optional.",
+            "type": "string"
+          },
+          "tripId": {
+            "description": "Trip id from list_trips. Optional.",
+            "type": "string"
+          }
+        },
+        "type": "object"
+      },
+      "name": "list_attachments"
+    },
+    {
+      "description": "Attach a small file (up to 5 MB after decoding) given as base64. Without eventId it is attached to the trip itself (the trip's important attachments); with eventId it hangs on that event. For a file on the computer, or anything over 5 MB: if you have add_attachment_from_path (only when connected through the TripEZGo bridge), use it with the file's path (up to 20 MB, the app's limit for one attachment). Otherwise ask the user to make the file smaller than 5 MB, or to connect with the Claude Desktop setup, which goes through the bridge.",
+      "inputSchema": {
+        "properties": {
+          "base64": {
+            "description": "The file's bytes, base64-encoded. At most 5 MB decoded.",
+            "type": "string"
+          },
+          "eventId": {
+            "description": "Event id from list_events. Leave out to attach to the trip.",
+            "type": "string"
+          },
+          "mimeType": {
+            "description": "MIME type, e.g. application/pdf. Optional.",
+            "type": "string"
+          },
+          "name": {
+            "description": "File name with its extension, e.g. ticket.pdf.",
+            "type": "string"
+          },
+          "tripId": {
+            "description": "Trip id from list_trips. Optional.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "name",
+          "base64"
+        ],
+        "type": "object"
+      },
+      "name": "add_attachment"
+    },
+    {
+      "description": "Take an attachment off one place. Without eventId that place is the trip itself; with eventId it is that event, and with eventId plus fromEventId it is the leg from fromEventId into eventId. If the attachment still hangs somewhere else it stays there; if this was its last place the file itself is deleted and cannot be brought back. There is no way to delete a file outright.",
+      "inputSchema": {
+        "properties": {
+          "attachmentId": {
+            "description": "Attachment id from list_attachments.",
+            "type": "string"
+          },
+          "eventId": {
+            "description": "The event it hangs on. Leave out for the trip itself.",
+            "type": "string"
+          },
+          "fromEventId": {
+            "description": "With eventId: the leg from this event into eventId.",
+            "type": "string"
+          },
+          "tripId": {
+            "description": "Trip id from list_trips. Optional.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "attachmentId"
+        ],
+        "type": "object"
+      },
+      "name": "detach_attachment"
+    },
+    {
+      "description": "List a trip's notes, most recently changed first: id, title, whether it is private (only the user sees it; a shared one is seen by everyone on a shared trip), when it last changed, and its first line. Notes in the trash are not listed. Use get_note to read one.",
+      "inputSchema": {
+        "properties": {
+          "tripId": {
+            "description": "Trip id from list_trips. Optional.",
+            "type": "string"
+          }
+        },
+        "type": "object"
+      },
+      "name": "list_notes"
+    },
+    {
+      "description": "Read one note: its title and its content as Markdown. Markdown subset, one line per paragraph: \"## \" a heading line, \"- \" a list item, any other line plain text (start it with \"\\\" if it would otherwise look like one of those). Notes have no check items: \"- [ ] \" / \"- [x] \" is refused — make a to-do with create_todo instead. A photo is a line \"[image:<id>]\". A mention (the app's @name link to an event or a shopping item of this trip) is \"[mention:event:<eventId>|<name>]\" or \"[mention:shoppingItem:<itemId>|<name>]\" inside a line, with \"\\\" before any \"]\" or \"\\\" in the name; to add one use an id from list_events or list_shopping_items. Bold and italics are not expressed; lines you leave unchanged keep theirs.",
+      "inputSchema": {
+        "properties": {
+          "noteId": {
+            "description": "Note id from list_notes.",
+            "type": "string"
+          },
+          "tripId": {
+            "description": "Trip id from list_trips. Optional.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "noteId"
+        ],
+        "type": "object"
+      },
+      "name": "get_note"
+    },
+    {
+      "description": "Write a new note in the trip. title is required; markdown is the content. Markdown subset, one line per paragraph: \"## \" a heading line, \"- \" a list item, any other line plain text (start it with \"\\\" if it would otherwise look like one of those). Notes have no check items: \"- [ ] \" / \"- [x] \" is refused — make a to-do with create_todo instead. A photo is a line \"[image:<id>]\". A mention (the app's @name link to an event or a shopping item of this trip) is \"[mention:event:<eventId>|<name>]\" or \"[mention:shoppingItem:<itemId>|<name>]\" inside a line, with \"\\\" before any \"]\" or \"\\\" in the name; to add one use an id from list_events or list_shopping_items. Bold and italics are not expressed; lines you leave unchanged keep theirs. A new note is private unless isPrivate is false. Photos cannot be added from here.",
+      "inputSchema": {
+        "properties": {
+          "isPrivate": {
+            "description": "Only the user sees it. Default true.",
+            "type": "boolean"
+          },
+          "markdown": {
+            "description": "The content, in the Markdown subset described above.",
+            "type": "string"
+          },
+          "title": {
+            "description": "The note's title.",
+            "type": "string"
+          },
+          "tripId": {
+            "description": "Trip id from list_trips. Optional.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "title"
+        ],
+        "type": "object"
+      },
+      "name": "create_note"
+    },
+    {
+      "description": "Change a note's title, content or privacy. Only what you pass changes; passing what it already has writes nothing. markdown replaces the whole content: start from get_note's markdown and keep every [image:<id>] line you do not mean to remove — leaving one out deletes that photo, and an id the note does not have is refused. Keep every [mention:...] placeholder you do not mean to remove the same way: leaving one out removes that mention. Markdown subset, one line per paragraph: \"## \" a heading line, \"- \" a list item, any other line plain text (start it with \"\\\" if it would otherwise look like one of those). Notes have no check items: \"- [ ] \" / \"- [x] \" is refused — make a to-do with create_todo instead. A photo is a line \"[image:<id>]\". A mention (the app's @name link to an event or a shopping item of this trip) is \"[mention:event:<eventId>|<name>]\" or \"[mention:shoppingItem:<itemId>|<name>]\" inside a line, with \"\\\" before any \"]\" or \"\\\" in the name; to add one use an id from list_events or list_shopping_items. Bold and italics are not expressed; lines you leave unchanged keep theirs.",
+      "inputSchema": {
+        "properties": {
+          "isPrivate": {
+            "description": "Only the user sees it.",
+            "type": "boolean"
+          },
+          "markdown": {
+            "description": "The whole new content.",
+            "type": "string"
+          },
+          "noteId": {
+            "description": "Note id from list_notes.",
+            "type": "string"
+          },
+          "title": {
+            "description": "New title.",
+            "type": "string"
+          },
+          "tripId": {
+            "description": "Trip id from list_trips. Optional.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "noteId"
+        ],
+        "type": "object"
+      },
+      "name": "update_note"
+    },
+    {
+      "description": "Move a note to the trash. It stays there for 30 days, and the user can bring it back from the notes trash in the app's Settings until then; after that it is gone.",
+      "inputSchema": {
+        "properties": {
+          "noteId": {
+            "description": "Note id from list_notes.",
+            "type": "string"
+          },
+          "tripId": {
+            "description": "Trip id from list_trips. Optional.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "noteId"
+        ],
+        "type": "object"
+      },
+      "name": "delete_note"
+    }
+  ]
 }
