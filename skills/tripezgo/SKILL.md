@@ -1,15 +1,33 @@
 ---
 name: tripezgo
-description: Plan trips and work in the TripEZGo iPhone app through its MCP server. Use when the user wants a trip planned or an itinerary drafted (any destination), or wants to read or change anything in TripEZGo — trips, events, legs, to-dos, notes, markers, shopping list, attachments.
+description: Plan trips and work in the TripEZGo iPhone app through its MCP server. Use when the user wants a trip planned or an itinerary drafted (any destination), or wants to read or change anything in TripEZGo — trips, events, legs, to-dos, notes, markers, shopping list, attachments — or pastes a 「連接 TripEZGo：…，金鑰 …」 connect sentence.
 ---
 
 # TripEZGo
 
 TripEZGo is a travel-planning iPhone app: one trip at a time on the phone, each with a day-by-day calendar of
 events, travel legs between events, and to-dos, files, notes, a shopping list and map markers. The `tripezgo`
-MCP server **is the app itself** and reaches **all** of the user's trips. It answers only while the phone shows
-the "連接電腦 AI" (connect computer AI) page on the same Wi-Fi; if every call fails to connect, ask the user to
-open that page again and keep the app in the foreground.
+MCP server reaches the app on the user's iPhone over the same Wi-Fi, and through it **all** of the user's trips.
+
+## Connecting
+
+The server starts unconnected; nothing about the phone is in its configuration. It connects in the
+conversation:
+
+- **The user pastes a connect sentence** — 「連接 TripEZGo：192.168.1.23:8765，金鑰 abc123」 or the same in
+  another language: call `connect` right away with `address` = the `IP:PORT` part and `token` = the key.
+- **A TripEZGo tool answers "Not connected"**, or the user asks for anything in TripEZGo before connecting: ask
+  the user to open TripEZGo on the iPhone › Settings › 用電腦 AI 編輯 (the "Connect computer AI" page; for a new
+  trip, New trip › 用電腦 AI 建立旅程), keep that page open, and paste the sentence it shows. Then `connect`.
+- **A tool says the connection ended** (the page was closed or reopened): ask for the sentence again and call
+  `connect` with the new one. Calling `connect` again always replaces the old connection.
+- **Can't reach the app**: the phone must stay on that page with TripEZGo in the foreground, on the same Wi-Fi
+  as this computer.
+- **A tool "doesn't exist yet" in the app**: the iPhone's TripEZGo is older than this server — tell the user to
+  update it from the App Store.
+
+`get_planning_guide` (this guide, served by the server for clients that have no skills folder) works without
+a connection.
 
 ## Route
 
@@ -54,8 +72,8 @@ the app estimates it from the map.
 **Notes and to-dos.** Notes take a Markdown subset: `#` headings and `-` lists, no checkboxes. Anything to
 tick off is a to-do (`create_todo`), on an event (`eventId`) or trip-wide.
 
-**Attachments.** A local file: `add_attachment_from_path` (only through the `TripEZGo/mcp` bridge; up to
-20 MB). Small generated content: `add_attachment` (base64, up to 5 MB). A new attachment hangs on the trip or
+**Attachments.** A local file: `add_attachment_from_path` (it reads the file on this computer; up to
+20 MB, or the limit the app states when you connect). Small generated content: `add_attachment` (base64, up to 5 MB). A new attachment hangs on the trip or
 on one event, never on a leg.
 
 **Deletes.** Confirm with the user before any `delete_*`, `clear_leg` or `detach_attachment` — the phone does
