@@ -5,9 +5,9 @@ import { homedir as homedir2 } from "node:os";
 import { join as join5 } from "node:path";
 
 // src/messages.ts
-function unreachableMessage(baseUrl, cause) {
+function unreachableMessage(baseUrl, cause, wording = "command") {
   const detail = cause instanceof Error ? describeCause(cause) : String(cause);
-  return `Can't reach the TripEZGo app at ${baseUrl} (${detail}). On the iPhone, keep the "Connect computer AI" page (\u9023\u63A5\u96FB\u8166 AI) open with TripEZGo in the foreground, and make sure the phone and this computer are on the same Wi-Fi.`;
+  return `Can't reach the TripEZGo app at ${baseUrl} (${detail}). On the iPhone, keep the "Connect computer AI" page (\u9023\u63A5\u96FB\u8166 AI) open with TripEZGo in the foreground, and make sure the phone and this computer are on the same Wi-Fi.` + (wording === "sentence" ? " If that page now shows a different address or a new connect sentence (the Wi-Fi changed, or the page was reopened), ask the user to copy the latest connect sentence from the iPhone and paste it again, then call `connect` with it." : "");
 }
 function unauthorizedMessage() {
   return 'The TripEZGo app rejected the token (HTTP 401). The token only works while the "Connect computer AI" page that made it stays open; if you closed it, open the page again and copy the new command.';
@@ -218,12 +218,15 @@ async function addAttachmentFromPath(args, options) {
       signal: AbortSignal.timeout(options.timeoutMs ?? 3e5)
     });
   } catch (error) {
-    return failure(unreachableMessage(options.baseUrl, error));
+    return failure(unreachableMessage(options.baseUrl, error, options.wording));
   }
   const text = await response.text();
   const json = parseObject(text);
   if (response.status === 409) return failure(apiLevelMismatchMessage(errorText(json)));
-  if (response.status === 401) return failure(options.unauthorizedMessage ?? unauthorizedMessage());
+  if (response.status === 401) {
+    options.onUnauthorized?.();
+    return failure(options.unauthorizedMessage ?? unauthorizedMessage());
+  }
   if (!response.ok) {
     return failure(`The TripEZGo app refused the upload (HTTP ${response.status}): ${errorText(json) ?? (text.trim() || "no details")}`);
   }
@@ -468,7 +471,7 @@ function stripFrontMatter(text) {
 
 // src/install.ts
 import { spawn } from "node:child_process";
-import { existsSync } from "node:fs";
+import { existsSync, realpathSync } from "node:fs";
 import { cp as cp2, mkdir as mkdir2, readFile as readFile3, rename as rename2, rm as rm2 } from "node:fs/promises";
 import { join as join3 } from "node:path";
 import { randomBytes as randomBytes2 } from "node:crypto";
@@ -697,24 +700,49 @@ function claudeDesktopConfigPath(deps) {
 }
 function upsertCodexServer(toml, command, args) {
   const kept = [];
-  let skipping = false;
+  let table = "";
+  let skippingTable = false;
+  let openValue = 0;
   for (const line of toml.split(/\r?\n/)) {
+    if (openValue > 0) {
+      openValue += bracketBalance(line);
+      continue;
+    }
     const header = /^\s*\[\[?\s*([^\]]+?)\s*\]\]?\s*(#.*)?$/.exec(line);
     if (header) {
-      const name = header[1].split(".").map((part) => part.trim().replace(/^"(.*)"$/, "$1").replace(/^'(.*)'$/, "$1")).join(".");
-      skipping = name === "mcp_servers.tripezgo" || name.startsWith("mcp_servers.tripezgo.");
+      table = normalizeTomlKey(header[1]);
+      skippingTable = isTripezgoKey(table);
+    } else if (!skippingTable) {
+      const assignment = /^\s*((?:"[^"]*"|'[^']*'|[A-Za-z0-9_-]+)(?:\s*\.\s*(?:"[^"]*"|'[^']*'|[A-Za-z0-9_-]+))*)\s*=(.*)$/.exec(line);
+      if (assignment) {
+        const key = normalizeTomlKey(assignment[1]);
+        if (isTripezgoKey(table ? `${table}.${key}` : key)) {
+          openValue = Math.max(0, bracketBalance(assignment[2]));
+          continue;
+        }
+      }
     }
-    if (!skipping) kept.push(line);
+    if (!skippingTable) kept.push(line);
   }
   while (kept.length > 0 && kept[kept.length - 1].trim() === "") kept.pop();
-  const table = [
+  const entry = [
     "[mcp_servers.tripezgo]",
     `command = ${tomlString(command)}`,
     `args = [${args.map(tomlString).join(", ")}]`,
     // A start may download an update before the bridge answers.
     "startup_timeout_sec = 30"
   ];
-  return [...kept, ...kept.length > 0 ? [""] : [], ...table, ""].join("\n");
+  return [...kept, ...kept.length > 0 ? [""] : [], ...entry, ""].join("\n");
+}
+function normalizeTomlKey(key) {
+  return key.split(".").map((part) => part.trim().replace(/^"(.*)"$/, "$1").replace(/^'(.*)'$/, "$1")).join(".");
+}
+function isTripezgoKey(key) {
+  return key === "mcp_servers.tripezgo" || key.startsWith("mcp_servers.tripezgo.");
+}
+function bracketBalance(text) {
+  const bare = text.replace(/"(?:[^"\\]|\\.)*"|'[^']*'/g, "").replace(/#.*$/, "");
+  return (bare.match(/[{[]/g)?.length ?? 0) - (bare.match(/[}\]]/g)?.length ?? 0);
 }
 function tomlString(value) {
   return JSON.stringify(value);
@@ -726,6 +754,22 @@ function parseJsonArray(text) {
   } catch {
     return [];
   }
+}
+var STABLE_NODE_PATHS = ["/opt/homebrew/bin/node", "/usr/local/bin/node"];
+function stableNodePath(execPath, candidates = STABLE_NODE_PATHS) {
+  let actual;
+  try {
+    actual = realpathSync(execPath);
+  } catch {
+    return execPath;
+  }
+  for (const candidate of candidates) {
+    try {
+      if (realpathSync(candidate) === actual) return candidate;
+    } catch {
+    }
+  }
+  return execPath;
 }
 function runCommand(command, args) {
   const windows = process.platform === "win32";
@@ -780,7 +824,17 @@ function loadAppToolSnapshot(root2, log2) {
 var CONNECT_TOOL_NAME = "connect";
 var GUIDE_TOOL_NAME = "get_planning_guide";
 var SUPPORTED_PROTOCOL_VERSIONS = ["2025-11-25", "2025-06-18", "2025-03-26", "2024-11-05"];
-var INSTRUCTIONS = `TripEZGo is a travel-planning iPhone app. These tools reach the app on the user's iPhone over the local Wi-Fi, after you connect to it. When the user pastes a connect sentence such as \u300C\u9023\u63A5 TripEZGo\uFF1A192.168.1.23:8765\uFF0C\u91D1\u9470 abc123\u300D, call \`connect\` right away with that address and key. When you are not connected yet and need the app: ${CONNECT_HOWTO} The connection lasts while that page stays open on the phone; if a tool later says the connection ended, ask for the sentence again. Before planning a trip or changing one, call \`get_planning_guide\` and follow it.`;
+var CONNECT_SENTENCE_TEMPLATES = [
+  "\u9023\u63A5 TripEZGo\uFF1A%1\uFF0C\u91D1\u9470 %2",
+  "\u8FDE\u63A5 TripEZGo\uFF1A%1\uFF0C\u5BC6\u94A5 %2",
+  "Connect to TripEZGo: %1, key %2",
+  "TripEZGo \u306B\u63A5\u7D9A\uFF1A%1\u3001\u30AD\u30FC %2",
+  "TripEZGo \uC5F0\uACB0: %1, \uD0A4 %2"
+];
+var SENTENCE_EXAMPLES = CONNECT_SENTENCE_TEMPLATES.map(
+  (template) => `"${template.replace("%1", "192.168.1.23:8765").replace("%2", "abc123")}"`
+).join(" / ");
+var INSTRUCTIONS = `TripEZGo is a travel-planning iPhone app. These tools reach the app on the user's iPhone over the local Wi-Fi, after you connect to it. When the user pastes a connect sentence \u2014 in any of the app's languages: ${SENTENCE_EXAMPLES} \u2014 call \`connect\` right away with that address (IP:PORT) and key. When you are not connected yet and need the app: ${CONNECT_HOWTO} The connection lasts while that page stays open on the phone; if a tool later says the connection ended, ask for the sentence again. Before planning a trip or changing one, call \`get_planning_guide\` and follow it.`;
 var SessionBridge = class {
   constructor(options) {
     this.options = options;
@@ -851,9 +905,10 @@ var SessionBridge = class {
         fetch: this.options.fetch,
         timeoutMs: this.options.uploadTimeoutMs,
         maxBytes: connection.uploadLimitBytes,
-        unauthorizedMessage: connectionLostMessage(401)
+        unauthorizedMessage: connectionLostMessage(401),
+        wording: "sentence",
+        onUnauthorized: () => this.drop(connection)
       });
-      if (result.isError && result.content[0]?.text === connectionLostMessage(401)) this.drop(connection);
       return [resultLine(id, result)];
     }
     return this.forwardCall(id, name, raw, connection);
@@ -894,7 +949,7 @@ var SessionBridge = class {
     try {
       response = await this.post(baseUrl, token, body, {});
     } catch (error) {
-      return toolFailure(unreachableMessage(baseUrl, error));
+      return toolFailure(unreachableMessage(baseUrl, error, "sentence"));
     }
     const text = await response.text();
     if (response.status === 401) return toolFailure(connectUnauthorizedMessage());
@@ -943,7 +998,7 @@ ${instructions}` : "")
     try {
       response = await this.post(connection.baseUrl, connection.token, raw, sessionHeaders(connection));
     } catch (error) {
-      return [resultLine(id, toolFailure(unreachableMessage(connection.baseUrl, error)))];
+      return [resultLine(id, toolFailure(unreachableMessage(connection.baseUrl, error, "sentence")))];
     }
     const sessionId = response.headers.get("mcp-session-id");
     if (sessionId) connection.sessionId = sessionId;
@@ -1013,12 +1068,12 @@ function connectTool() {
   return {
     name: CONNECT_TOOL_NAME,
     title: "Connect to the TripEZGo app",
-    description: "Connect to the TripEZGo app on the user's iPhone. Call this when the user pastes the connect sentence from the app's Connect computer AI page, e.g. \u300C\u9023\u63A5 TripEZGo\uFF1A192.168.1.23:8765\uFF0C\u91D1\u9470 abc123\u300D: address is the IP:PORT part, token is the key. Calling it again replaces the previous connection. Every other TripEZGo tool needs a connection first.",
+    description: `Connect to the TripEZGo app on the user's iPhone. Call this when the user pastes the connect sentence from the app's Connect computer AI page, in any of the app's languages: ${SENTENCE_EXAMPLES}. address is the IP:PORT part, token is the key. Calling it again replaces the previous connection. Every other TripEZGo tool needs a connection first.`,
     inputSchema: {
       type: "object",
       properties: {
         address: { type: "string", description: "The address from the sentence, e.g. 192.168.1.23:8765 (http://\u2026 and \u2026/mcp work too)." },
-        token: { type: "string", description: "The key (\u91D1\u9470) from the sentence." }
+        token: { type: "string", description: "The key from the sentence (\u91D1\u9470 / \u5BC6\u94A5 / key / \u30AD\u30FC / \uD0A4)." }
       },
       required: ["address", "token"]
     }
@@ -1032,7 +1087,12 @@ function guideTool(guide) {
     inputSchema: {
       type: "object",
       properties: {
-        topic: { type: "string", enum: [...guide.topics], description: "One section of the guide. Omit for the whole guide." }
+        // An empty enum would admit no value at all; with no topics, leave the choice open.
+        topic: {
+          type: "string",
+          ...guide.topics.length > 0 ? { enum: [...guide.topics] } : {},
+          description: "One section of the guide. Omit for the whole guide."
+        }
       }
     }
   };
@@ -1064,7 +1124,7 @@ if (argv[0] === "install") {
     home: homedir2(),
     platform: process.platform,
     env: process.env,
-    nodePath: process.execPath,
+    nodePath: stableNodePath(process.execPath),
     packageRoot: root,
     version,
     run: runCommand,

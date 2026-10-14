@@ -29,8 +29,29 @@ export interface LauncherDeps {
   extract?: (archive: string, dest: string) => Promise<void>;
   /** False skips the network (TRIPEZGO_NO_UPDATE=1). */
   checkForUpdates?: boolean;
+  /**
+   * Starts `updateCache` somewhere that doesn't hold up this start (the real launcher: a detached child
+   * process). Called only when a cached version is about to run.
+   */
+  startBackgroundUpdate?: () => void;
   tagsTimeoutMs?: number;
   downloadTimeoutMs?: number;
+  /** Where releases come from; GitHub unless overridden (TRIPEZGO_UPDATE_BASE, for testing a release). */
+  sources?: ReleaseSources;
+}
+
+export interface ReleaseSources {
+  tags: string;
+  tarball: (tag: string) => string;
+}
+
+/** The GitHub API + codeload URL shapes under another origin, e.g. a local stand-in server. */
+export function sourcesAt(base: string): ReleaseSources {
+  const root = base.replace(/\/+$/, "");
+  return {
+    tags: `${root}/repos/${REPO}/tags?per_page=100`,
+    tarball: (tag) => `${root}/${REPO}/tar.gz/refs/tags/${tag}`,
+  };
 }
 
 export interface PickedVersion {
@@ -38,36 +59,60 @@ export interface PickedVersion {
   dir: string;
 }
 
+/**
+ * Picks the version to run, without waiting on the network: the newest cached one runs at once, and the update
+ * check runs in the background so a newer release applies on the next start. Only with nothing cached at all
+ * does it check and download in the foreground.
+ */
 export async function prepareVersion(deps: LauncherDeps): Promise<PickedVersion | undefined> {
   const versions = join(deps.home, "versions");
+  let cached = await cachedTags(versions);
 
-  if (deps.checkForUpdates !== false) {
-    const latest = await latestTag(deps);
-    if (latest && !isComplete(join(versions, latest))) {
-      try {
-        await download(deps, latest);
-        deps.log(`updated to ${latest}`);
-      } catch (error) {
-        deps.log(`couldn't download ${latest} (${describe(error)}); using the cached version`);
-      }
+  if (cached.length === 0) {
+    if (deps.checkForUpdates === false) return undefined;
+    await updateCache(deps);
+    cached = await cachedTags(versions);
+    if (cached.length === 0) return undefined;
+  } else if (deps.checkForUpdates !== false) {
+    try {
+      deps.startBackgroundUpdate?.();
+    } catch (error) {
+      deps.log(`couldn't start the background update (${describe(error)})`);
     }
   }
 
-  const cached = await cachedTags(versions);
-  if (cached.length === 0) return undefined;
   const picked: PickedVersion = { tag: cached[0], dir: join(versions, cached[0]) };
-
-  for (const old of cached.slice(KEEP_VERSIONS)) {
-    await rm(join(versions, old), { recursive: true, force: true }).catch(() => undefined);
-  }
-  await sweepStaleTemp(join(deps.home, "tmp"));
   await syncSkills(deps, picked);
   return picked;
 }
 
+/**
+ * Checks the release tags (short timeout) and, when the newest isn't cached, downloads it. Then keeps the two
+ * newest versions. Every failure leaves the cache as it was.
+ */
+export async function updateCache(deps: LauncherDeps): Promise<string | undefined> {
+  const versions = join(deps.home, "versions");
+  const latest = await latestTag(deps);
+  const newestCached = (await cachedTags(versions))[0];
+  // Only something newer than what already runs is worth a download (an install can be ahead of the tags).
+  if (latest && (!newestCached || compareTags(latest, newestCached) > 0)) {
+    try {
+      await download(deps, latest);
+      deps.log(`downloaded ${latest}; it runs from the next start`);
+    } catch (error) {
+      deps.log(`couldn't download ${latest} (${describe(error)}); keeping the cached version`);
+    }
+  }
+  for (const old of (await cachedTags(versions)).slice(KEEP_VERSIONS)) {
+    await rm(join(versions, old), { recursive: true, force: true }).catch(() => undefined);
+  }
+  await sweepStaleTemp(join(deps.home, "tmp"));
+  return latest;
+}
+
 async function latestTag(deps: LauncherDeps): Promise<string | undefined> {
   try {
-    const response = await deps.fetch(TAGS_URL, {
+    const response = await deps.fetch(deps.sources?.tags ?? TAGS_URL, {
       headers: { Accept: "application/vnd.github+json", "User-Agent": "tripezgo-launcher" },
       signal: AbortSignal.timeout(deps.tagsTimeoutMs ?? 2_000),
     });
@@ -93,7 +138,7 @@ async function download(deps: LauncherDeps, tag: string): Promise<void> {
   const temp = join(deps.home, "tmp", `${tag}-${process.pid}-${randomBytes(4).toString("hex")}`);
   try {
     await mkdir(join(temp, "x"), { recursive: true });
-    const response = await deps.fetch(tarballUrl(tag), {
+    const response = await deps.fetch(deps.sources?.tarball(tag) ?? tarballUrl(tag), {
       headers: { "User-Agent": "tripezgo-launcher" },
       signal: AbortSignal.timeout(deps.downloadTimeoutMs ?? 20_000),
     });

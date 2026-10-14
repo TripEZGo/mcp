@@ -1,6 +1,6 @@
 ---
 name: tripezgo
-description: Plan trips and work in the TripEZGo iPhone app through its MCP server. Use when the user wants a trip planned or an itinerary drafted (any destination), or wants to read or change anything in TripEZGo — trips, events, legs, to-dos, notes, markers, shopping list, attachments — or pastes a 「連接 TripEZGo：…，金鑰 …」 connect sentence.
+description: Plan trips and work in the TripEZGo iPhone app through its MCP server. Use when the user wants a trip planned or an itinerary drafted (any destination), or wants to read or change anything in TripEZGo — trips, events, legs, to-dos, notes, markers, shopping list, attachments — or pastes a TripEZGo connect sentence in any of its languages: 「連接 TripEZGo：IP:PORT，金鑰 …」, 「连接 TripEZGo：IP:PORT，密钥 …」, "Connect to TripEZGo: IP:PORT, key …", 「TripEZGo に接続：IP:PORT、キー …」, "TripEZGo 연결: IP:PORT, 키 …".
 ---
 
 # TripEZGo
@@ -14,15 +14,24 @@ MCP server reaches the app on the user's iPhone over the same Wi-Fi, and through
 The server starts unconnected; nothing about the phone is in its configuration. It connects in the
 conversation:
 
-- **The user pastes a connect sentence** — 「連接 TripEZGo：192.168.1.23:8765，金鑰 abc123」 or the same in
-  another language: call `connect` right away with `address` = the `IP:PORT` part and `token` = the key.
+- **The user pastes a connect sentence**, in whichever language the phone uses — call `connect` right away
+  with `address` = the `IP:PORT` part and `token` = the key:
+
+  | Language | Sentence |
+  |---|---|
+  | 繁體中文 | 連接 TripEZGo：192.168.1.23:8765，金鑰 abc123 |
+  | 简体中文 | 连接 TripEZGo：192.168.1.23:8765，密钥 abc123 |
+  | English | Connect to TripEZGo: 192.168.1.23:8765, key abc123 |
+  | 日本語 | TripEZGo に接続：192.168.1.23:8765、キー abc123 |
+  | 한국어 | TripEZGo 연결: 192.168.1.23:8765, 키 abc123 |
 - **A TripEZGo tool answers "Not connected"**, or the user asks for anything in TripEZGo before connecting: ask
   the user to open TripEZGo on the iPhone › Settings › 用電腦 AI 編輯 (the "Connect computer AI" page; for a new
   trip, New trip › 用電腦 AI 建立旅程), keep that page open, and paste the sentence it shows. Then `connect`.
 - **A tool says the connection ended** (the page was closed or reopened): ask for the sentence again and call
   `connect` with the new one. Calling `connect` again always replaces the old connection.
 - **Can't reach the app**: the phone must stay on that page with TripEZGo in the foreground, on the same Wi-Fi
-  as this computer.
+  as this computer. If the page now shows a different address or a new sentence (the Wi-Fi changed, or the
+  page was reopened), ask the user to copy the latest sentence from the iPhone and paste it again.
 - **A tool "doesn't exist yet" in the app**: the iPhone's TripEZGo is older than this server — tell the user to
   update it from the App Store.
 

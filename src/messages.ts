@@ -1,11 +1,22 @@
 /** Human-readable messages shared by the bridge and the upload tool. */
 
-export function unreachableMessage(baseUrl: string, cause: unknown): string {
+export type Wording = "command" | "sentence";
+
+/**
+ * `wording` is what the user copies from the iPhone: the 0.1 command (older app builds, `--url/--token`) or the
+ * connect sentence.
+ */
+export function unreachableMessage(baseUrl: string, cause: unknown, wording: Wording = "command"): string {
   const detail = cause instanceof Error ? describeCause(cause) : String(cause);
   return (
     `Can't reach the TripEZGo app at ${baseUrl} (${detail}). ` +
     `On the iPhone, keep the "Connect computer AI" page (連接電腦 AI) open with TripEZGo in the foreground, ` +
-    `and make sure the phone and this computer are on the same Wi-Fi.`
+    `and make sure the phone and this computer are on the same Wi-Fi.` +
+    (wording === "sentence"
+      ? " If that page now shows a different address or a new connect sentence (the Wi-Fi changed, or the page " +
+        "was reopened), ask the user to copy the latest connect sentence from the iPhone and paste it again, " +
+        "then call `connect` with it."
+      : "")
   );
 }
 

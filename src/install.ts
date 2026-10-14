@@ -1,5 +1,5 @@
 import { spawn } from "node:child_process";
-import { existsSync } from "node:fs";
+import { existsSync, realpathSync } from "node:fs";
 import { cp, mkdir, readFile, rename, rm } from "node:fs/promises";
 import { join } from "node:path";
 import { randomBytes } from "node:crypto";
@@ -231,32 +231,64 @@ function claudeDesktopConfigPath(deps: InstallDeps): string | undefined {
 }
 
 /**
- * Puts `[mcp_servers.tripezgo]` (command, args) into a Codex config.toml: an existing tripezgo table and its
- * sub-tables are dropped, every other line is kept as it was.
+ * Puts `[mcp_servers.tripezgo]` (command, args) into a Codex config.toml. Every existing definition of the
+ * tripezgo server is dropped first — its table and sub-tables, an inline `tripezgo = {…}` under
+ * `[mcp_servers]` (one line or several), and dotted keys such as `mcp_servers.tripezgo.command = …` — so the
+ * key is never defined twice. Every other line is kept as it was.
  */
 export function upsertCodexServer(toml: string, command: string, args: string[]): string {
   const kept: string[] = [];
-  let skipping = false;
+  let table = "";
+  let skippingTable = false;
+  /** Open brackets of a dropped value that continues on the next lines. */
+  let openValue = 0;
   for (const line of toml.split(/\r?\n/)) {
+    if (openValue > 0) {
+      openValue += bracketBalance(line);
+      continue;
+    }
     const header = /^\s*\[\[?\s*([^\]]+?)\s*\]\]?\s*(#.*)?$/.exec(line);
     if (header) {
-      const name = header[1]
-        .split(".")
-        .map((part) => part.trim().replace(/^"(.*)"$/, "$1").replace(/^'(.*)'$/, "$1"))
-        .join(".");
-      skipping = name === "mcp_servers.tripezgo" || name.startsWith("mcp_servers.tripezgo.");
+      table = normalizeTomlKey(header[1]);
+      skippingTable = isTripezgoKey(table);
+    } else if (!skippingTable) {
+      const assignment = /^\s*((?:"[^"]*"|'[^']*'|[A-Za-z0-9_-]+)(?:\s*\.\s*(?:"[^"]*"|'[^']*'|[A-Za-z0-9_-]+))*)\s*=(.*)$/.exec(line);
+      if (assignment) {
+        const key = normalizeTomlKey(assignment[1]);
+        if (isTripezgoKey(table ? `${table}.${key}` : key)) {
+          openValue = Math.max(0, bracketBalance(assignment[2]));
+          continue;
+        }
+      }
     }
-    if (!skipping) kept.push(line);
+    if (!skippingTable) kept.push(line);
   }
   while (kept.length > 0 && kept[kept.length - 1].trim() === "") kept.pop();
-  const table = [
+  const entry = [
     "[mcp_servers.tripezgo]",
     `command = ${tomlString(command)}`,
     `args = [${args.map(tomlString).join(", ")}]`,
     // A start may download an update before the bridge answers.
     "startup_timeout_sec = 30",
   ];
-  return [...kept, ...(kept.length > 0 ? [""] : []), ...table, ""].join("\n");
+  return [...kept, ...(kept.length > 0 ? [""] : []), ...entry, ""].join("\n");
+}
+
+function normalizeTomlKey(key: string): string {
+  return key
+    .split(".")
+    .map((part) => part.trim().replace(/^"(.*)"$/, "$1").replace(/^'(.*)'$/, "$1"))
+    .join(".");
+}
+
+function isTripezgoKey(key: string): boolean {
+  return key === "mcp_servers.tripezgo" || key.startsWith("mcp_servers.tripezgo.");
+}
+
+/** `{`/`[` minus `}`/`]` outside strings: > 0 means the value goes on past this line. */
+function bracketBalance(text: string): number {
+  const bare = text.replace(/"(?:[^"\\]|\\.)*"|'[^']*'/g, "").replace(/#.*$/, "");
+  return (bare.match(/[{[]/g)?.length ?? 0) - (bare.match(/[}\]]/g)?.length ?? 0);
 }
 
 /** A TOML basic string. JSON's escaping is a subset of TOML's for everything a path can hold. */
@@ -271,6 +303,31 @@ function parseJsonArray(text: string): Record<string, unknown>[] {
   } catch {
     return [];
   }
+}
+
+/** Package-manager symlinks that keep pointing at the current node across upgrades. */
+export const STABLE_NODE_PATHS = ["/opt/homebrew/bin/node", "/usr/local/bin/node"];
+
+/**
+ * The node path to write into the MCP config. `process.execPath` is the resolved binary (Homebrew:
+ * `…/Cellar/node/24.1.0/bin/node`), which disappears on the next `brew upgrade`; a well-known symlink to the
+ * same binary survives it. Anything else (nvm, Volta, the official installer) keeps `execPath`.
+ */
+export function stableNodePath(execPath: string, candidates: readonly string[] = STABLE_NODE_PATHS): string {
+  let actual: string;
+  try {
+    actual = realpathSync(execPath);
+  } catch {
+    return execPath;
+  }
+  for (const candidate of candidates) {
+    try {
+      if (realpathSync(candidate) === actual) return candidate;
+    } catch {
+      // not there
+    }
+  }
+  return execPath;
 }
 
 /** The real `run`: no shell, output collected, ENOENT reported as `notFound`. */

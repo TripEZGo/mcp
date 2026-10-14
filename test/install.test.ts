@@ -1,9 +1,53 @@
-import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, rm, symlink, writeFile } from "node:fs/promises";
 import { existsSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { type InstallDeps, type RunResult, runInstall, upsertCodexServer } from "../src/install.js";
+import {
+  type InstallDeps,
+  type RunResult,
+  STABLE_NODE_PATHS,
+  runInstall,
+  stableNodePath,
+  upsertCodexServer,
+} from "../src/install.js";
+
+describe("stableNodePath", () => {
+  let dir: string;
+  beforeEach(async () => {
+    dir = await mkdtemp(join(tmpdir(), "tripezgo-node-"));
+  });
+  afterEach(async () => {
+    await rm(dir, { recursive: true, force: true });
+  });
+
+  it("prefers a well-known symlink that resolves to the running node, so a Homebrew upgrade doesn't break it", async () => {
+    const cellar = join(dir, "Cellar", "node", "24.1.0", "bin");
+    await mkdir(cellar, { recursive: true });
+    await writeFile(join(cellar, "node"), "");
+    await mkdir(join(dir, "brew", "bin"), { recursive: true });
+    await symlink(join(cellar, "node"), join(dir, "brew", "bin", "node"));
+
+    expect(stableNodePath(join(cellar, "node"), [join(dir, "nope", "node"), join(dir, "brew", "bin", "node")])).toBe(
+      join(dir, "brew", "bin", "node"),
+    );
+  });
+
+  it("keeps execPath when no well-known path is the same binary", async () => {
+    const nvm = join(dir, "nvm", "node");
+    const other = join(dir, "other", "node");
+    await mkdir(join(dir, "nvm"), { recursive: true });
+    await mkdir(join(dir, "other"), { recursive: true });
+    await writeFile(nvm, "");
+    await writeFile(other, "");
+
+    expect(stableNodePath(nvm, [other, join(dir, "missing", "node")])).toBe(nvm);
+  });
+
+  it("looks at /opt/homebrew/bin/node and /usr/local/bin/node by default", () => {
+    expect(STABLE_NODE_PATHS).toEqual(["/opt/homebrew/bin/node", "/usr/local/bin/node"]);
+  });
+});
 
 const NODE = "/opt/node/bin/node";
 
@@ -250,6 +294,49 @@ describe("upsertCodexServer", () => {
     const out = upsertCodexServer(toml, "/n", ["/l"]);
     expect(out).not.toContain('"old"');
     expect(out).toContain('[mcp_servers.tripezgo2]\ncommand = "keep"');
+  });
+
+  it("removes an inline tripezgo entry under [mcp_servers] so the key is never defined twice", () => {
+    const toml = [
+      "[mcp_servers]",
+      'other = { command = "o" }',
+      'tripezgo = { url = "http://1.2.3.4:8765/mcp", http_headers = { "Authorization" = "Bearer x" } }',
+      '"tripezgo" = { command = "quoted" }',
+      'tripezgo.command = "dotted"',
+      "",
+      "[profiles.a]",
+      'tripezgo = "a profile setting named the same, kept"',
+      "",
+    ].join("\n");
+
+    const out = upsertCodexServer(toml, "/n", ["/l"]);
+
+    expect(out).toContain('other = { command = "o" }');
+    expect(out).not.toContain("Bearer x");
+    expect(out).not.toContain('"quoted"');
+    expect(out).not.toContain('"dotted"');
+    expect(out).toContain('tripezgo = "a profile setting named the same, kept"');
+    expect(out.match(/\[mcp_servers\.tripezgo\]/g)).toHaveLength(1);
+  });
+
+  it("removes a multi-line inline table and root-level dotted keys for tripezgo", () => {
+    const toml = [
+      'model = "m"',
+      'mcp_servers.tripezgo.command = "root-dotted"',
+      "[mcp_servers]",
+      "tripezgo = {",
+      '  command = "multi",',
+      '  args = ["x"],',
+      "}",
+      'keep = { command = "k" }',
+      "",
+    ].join("\n");
+
+    const out = upsertCodexServer(toml, "/n", ["/l"]);
+
+    expect(out).toContain('model = "m"');
+    expect(out).toContain('keep = { command = "k" }');
+    expect(out).not.toMatch(/root-dotted|multi|"x"/);
   });
 
   it("escapes Windows paths as TOML strings", () => {

@@ -4,7 +4,7 @@ import { join } from "node:path";
 import { Bridge } from "./bridge.js";
 import { ConfigError, USAGE, parseConfig } from "./config.js";
 import { loadGuide } from "./guide.js";
-import { runCommand, runInstall } from "./install.js";
+import { runCommand, runInstall, stableNodePath } from "./install.js";
 import { SKILL_PATH, loadAppToolSnapshot, packageRootOf, packageVersion } from "./package.js";
 import { SessionBridge } from "./session.js";
 import { runStdio } from "./stdio.js";
@@ -20,7 +20,7 @@ if (argv[0] === "install") {
     home: homedir(),
     platform: process.platform,
     env: process.env,
-    nodePath: process.execPath,
+    nodePath: stableNodePath(process.execPath),
     packageRoot: root,
     version,
     run: runCommand,

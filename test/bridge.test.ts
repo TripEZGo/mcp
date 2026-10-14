@@ -227,6 +227,8 @@ describe("Bridge when the app is not reachable", () => {
     expect(reply.error.message).toContain(baseUrl);
     expect(reply.error.message).toMatch(/Connect computer AI/);
     expect(reply.error.message).toMatch(/same Wi-Fi/);
+    // Older app builds show a command, not a connect sentence.
+    expect(reply.error.message).not.toMatch(/connect sentence/);
   });
 
   it("logs, and writes nothing, for a notification", async () => {

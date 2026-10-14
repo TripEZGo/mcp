@@ -30,10 +30,26 @@ export const GUIDE_TOOL_NAME = "get_planning_guide";
 /** Protocol versions this bridge answers to its client, newest first. The app negotiates its own. */
 export const SUPPORTED_PROTOCOL_VERSIONS = ["2025-11-25", "2025-06-18", "2025-03-26", "2024-11-05"];
 
+/**
+ * The connect sentence the app's page shows, in each of the app's languages (`%1` = IP:PORT, `%2` = key);
+ * zh-Hant-TW and zh-Hant-HK share the first. Must match the app's Localizable strings.
+ */
+export const CONNECT_SENTENCE_TEMPLATES = [
+  "連接 TripEZGo：%1，金鑰 %2",
+  "连接 TripEZGo：%1，密钥 %2",
+  "Connect to TripEZGo: %1, key %2",
+  "TripEZGo に接続：%1、キー %2",
+  "TripEZGo 연결: %1, 키 %2",
+];
+
+const SENTENCE_EXAMPLES = CONNECT_SENTENCE_TEMPLATES.map(
+  (template) => `"${template.replace("%1", "192.168.1.23:8765").replace("%2", "abc123")}"`,
+).join(" / ");
+
 export const INSTRUCTIONS =
   "TripEZGo is a travel-planning iPhone app. These tools reach the app on the user's iPhone over the local " +
-  "Wi-Fi, after you connect to it. When the user pastes a connect sentence such as " +
-  "「連接 TripEZGo：192.168.1.23:8765，金鑰 abc123」, call `connect` right away with that address and key. When " +
+  "Wi-Fi, after you connect to it. When the user pastes a connect sentence — in any of the app's languages: " +
+  `${SENTENCE_EXAMPLES} — call \`connect\` right away with that address (IP:PORT) and key. When ` +
   `you are not connected yet and need the app: ${CONNECT_HOWTO} ` +
   "The connection lasts while that page stays open on the phone; if a tool later says the connection ended, " +
   "ask for the sentence again. Before planning a trip or changing one, call `get_planning_guide` and follow it.";
@@ -146,8 +162,9 @@ export class SessionBridge {
         timeoutMs: this.options.uploadTimeoutMs,
         maxBytes: connection.uploadLimitBytes,
         unauthorizedMessage: connectionLostMessage(401),
+        wording: "sentence",
+        onUnauthorized: () => this.drop(connection),
       });
-      if (result.isError && result.content[0]?.text === connectionLostMessage(401)) this.drop(connection);
       return [resultLine(id, result)];
     }
 
@@ -194,7 +211,7 @@ export class SessionBridge {
     try {
       response = await this.post(baseUrl, token, body, {});
     } catch (error) {
-      return toolFailure(unreachableMessage(baseUrl, error));
+      return toolFailure(unreachableMessage(baseUrl, error, "sentence"));
     }
     const text = await response.text();
     if (response.status === 401) return toolFailure(connectUnauthorizedMessage());
@@ -249,7 +266,7 @@ export class SessionBridge {
       response = await this.post(connection.baseUrl, connection.token, raw, sessionHeaders(connection));
     } catch (error) {
       // The phone locked or left the page for a moment; the same key works again when it comes back.
-      return [resultLine(id, toolFailure(unreachableMessage(connection.baseUrl, error)))];
+      return [resultLine(id, toolFailure(unreachableMessage(connection.baseUrl, error, "sentence")))];
     }
     const sessionId = response.headers.get("mcp-session-id");
     if (sessionId) connection.sessionId = sessionId;
@@ -338,14 +355,14 @@ export function connectTool(): Tool {
     title: "Connect to the TripEZGo app",
     description:
       "Connect to the TripEZGo app on the user's iPhone. Call this when the user pastes the connect sentence " +
-      "from the app's Connect computer AI page, e.g. 「連接 TripEZGo：192.168.1.23:8765，金鑰 abc123」: address is " +
-      "the IP:PORT part, token is the key. Calling it again replaces the previous connection. Every other " +
-      "TripEZGo tool needs a connection first.",
+      `from the app's Connect computer AI page, in any of the app's languages: ${SENTENCE_EXAMPLES}. ` +
+      "address is the IP:PORT part, token is the key. Calling it again replaces the previous connection. Every " +
+      "other TripEZGo tool needs a connection first.",
     inputSchema: {
       type: "object",
       properties: {
         address: { type: "string", description: "The address from the sentence, e.g. 192.168.1.23:8765 (http://… and …/mcp work too)." },
-        token: { type: "string", description: "The key (金鑰) from the sentence." },
+        token: { type: "string", description: "The key from the sentence (金鑰 / 密钥 / key / キー / 키)." },
       },
       required: ["address", "token"],
     },
@@ -363,7 +380,12 @@ export function guideTool(guide: PlanningGuide): Tool {
     inputSchema: {
       type: "object",
       properties: {
-        topic: { type: "string", enum: [...guide.topics], description: "One section of the guide. Omit for the whole guide." },
+        // An empty enum would admit no value at all; with no topics, leave the choice open.
+        topic: {
+          type: "string",
+          ...(guide.topics.length > 0 ? { enum: [...guide.topics] } : {}),
+          description: "One section of the guide. Omit for the whole guide.",
+        },
       },
     },
   };

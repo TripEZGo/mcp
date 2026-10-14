@@ -109,6 +109,37 @@ describe("SessionBridge before connecting", () => {
     expect(guide.inputSchema.properties.topic.enum).toEqual(["planning", "sources"]);
   });
 
+  it("omits the topic enum when the guide couldn't be read, instead of an empty enum no value satisfies", async () => {
+    const empty = new SessionBridge({
+      appTools: [],
+      guide: { topics: [], full: () => "missing", topic: () => undefined },
+      version: "0.2.1",
+    });
+    const reply = parse(await empty.handle('{"jsonrpc":"2.0","id":2,"method":"tools/list"}'));
+    const guide = reply.result.tools.find((t: { name: string }) => t.name === "get_planning_guide");
+    expect(guide.inputSchema.properties.topic).not.toHaveProperty("enum");
+    expect(guide.inputSchema.properties.topic.type).toBe("string");
+  });
+
+  // The app's connect sentence in each of its languages (zh-Hant-TW and zh-Hant-HK share one).
+  const SENTENCES = [
+    "連接 TripEZGo：192.168.1.23:8765，金鑰",
+    "连接 TripEZGo：192.168.1.23:8765，密钥",
+    "Connect to TripEZGo: 192.168.1.23:8765, key",
+    "TripEZGo に接続：192.168.1.23:8765、キー",
+    "TripEZGo 연결: 192.168.1.23:8765, 키",
+  ];
+
+  it("teaches the connect sentence in every app language, in the instructions and the connect tool", async () => {
+    const init = parse(await bridge.handle(JSON.stringify(CLIENT_INIT)));
+    const list = parse(await bridge.handle('{"jsonrpc":"2.0","id":2,"method":"tools/list"}'));
+    const connect = list.result.tools.find((t: { name: string }) => t.name === "connect");
+    for (const sentence of SENTENCES) {
+      expect(init.result.instructions).toContain(sentence);
+      expect(connect.description).toContain(sentence);
+    }
+  });
+
   it("answers ping and swallows notifications without any network", async () => {
     expect(parse(await bridge.handle('{"jsonrpc":"2.0","id":3,"method":"ping"}'))).toEqual({ jsonrpc: "2.0", id: 3, result: {} });
     expect(await bridge.handle('{"jsonrpc":"2.0","method":"notifications/initialized"}')).toEqual([]);
@@ -236,6 +267,32 @@ describe("SessionBridge connect", () => {
 
     expect(reply.result.isError).toBe(true);
     expect(reply.result.content[0].text).toMatch(/same Wi-Fi/);
+    // The phone may have moved to another Wi-Fi or reopened the page: the address in hand is stale.
+    expect(reply.result.content[0].text).toMatch(/copy the latest connect sentence from the iPhone and paste it again/);
+  });
+
+  it("forgets the connection when an upload is refused with 401", async () => {
+    await bridge.handle(call("connect", { address: baseUrl, token: TOKEN }));
+    const dir = await mkdtemp(join(tmpdir(), "tripezgo-session-"));
+    try {
+      const file = join(dir, "a.pdf");
+      await writeFile(file, Buffer.from([1]));
+      app.handler = () => ({ status: 401 });
+
+      const reply = parse(await bridge.handle(call("add_attachment_from_path", { path: file })));
+
+      expect(reply.result.isError).toBe(true);
+      expect(reply.result.content[0].text).toMatch(/connect sentence/);
+      expect(parse(await bridge.handle(call("list_trips"))).result.content[0].text).toMatch(/Not connected/);
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("keeps the connection when an upload fails for another reason", async () => {
+    await bridge.handle(call("connect", { address: baseUrl, token: TOKEN }));
+    expect(parse(await bridge.handle(call("add_attachment_from_path", { path: "/no/such/file.pdf" }))).result.isError).toBe(true);
+    expect(parse(await bridge.handle(call("list_trips"))).result.content[0].text).toBe("ran list_trips");
   });
 
   it("refuses a missing or malformed address or token without calling anything", async () => {

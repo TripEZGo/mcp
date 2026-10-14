@@ -45,6 +45,9 @@ If you re-install Node.js somewhere else (a different nvm version, say), run the
    連接 TripEZGo：192.168.1.23:8765，金鑰 abc123…
    ```
 
+   or, in the phone's language, `连接 TripEZGo：…，密钥 …` / `Connect to TripEZGo: …, key …` /
+   `TripEZGo に接続：…、キー …` / `TripEZGo 연결: …, 키 …`.
+
 3. Copy it and paste it into the conversation. The AI calls the `connect` tool with it and is connected.
 4. Keep the page open. Locking the phone or switching apps pauses the link and coming back resumes it. Closing
    the page ends it; next time, paste the new sentence.
@@ -56,10 +59,12 @@ default — the one used when the AI doesn't say which trip; opened from New tri
 
 ## Updates
 
-Every time your AI app starts the server, the launcher checks this repository's newest release tag (`vX.Y.Z`,
-2-second timeout). A newer one is downloaded to `~/.tripezgo/versions/<tag>` and run; the installed skill
-folders are refreshed from it. Offline, or if GitHub is slow, it runs the newest version already there. The two
-newest versions are kept. Set `TRIPEZGO_NO_UPDATE=1` in the server's environment to skip the check.
+Every time your AI app starts the server, the launcher runs the newest version already on the computer
+(`~/.tripezgo/versions/<tag>`) at once — startup never waits on the network — and refreshes the installed skill
+folders from that version. Meanwhile a background process checks this repository's newest release tag
+(`vX.Y.Z`, 2-second timeout) and, if it is newer, downloads it; it runs from the **next** start. Offline or slow
+GitHub changes nothing. The two newest versions are kept; the background log is `~/.tripezgo/update.log`. Set
+`TRIPEZGO_NO_UPDATE=1` in the server's environment to skip the check.
 
 ## Tools
 
@@ -145,8 +150,8 @@ npx -y github:TripEZGo/mcp install claude-desktop
 把頁面上那句「連接 TripEZGo：IP:PORT，金鑰 …」複製貼到對話裡，AI 會自己連上。頁面要一直開著：鎖屏或切到別的 App
 會暫停，回來自動接上；關掉頁面就中斷、金鑰作廢，下次貼新的那句。AI 能讀寫 App 裡**所有**旅程。
 
-**更新**：每次 AI App 啟動這個 server，啟動器會查這個 repo 最新的版本標籤，有新版就下載後執行，並更新已安裝的
-skill；離線就用電腦上已有的版本。
+**更新**：每次 AI App 啟動這個 server，啟動器立刻執行電腦上已有的最新版（不等網路），同時在背景查這個 repo
+最新的版本標籤，有新版就下載，下一次啟動生效；已安裝的 skill 跟著執行中的版本更新。離線不影響。
 
 ## License
 

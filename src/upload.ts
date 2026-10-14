@@ -2,7 +2,7 @@ import { readFile, stat } from "node:fs/promises";
 import { homedir } from "node:os";
 import { basename, resolve } from "node:path";
 import type { CallToolResult, Tool } from "./protocol.js";
-import { apiLevelMismatchMessage, unauthorizedMessage, unreachableMessage } from "./messages.js";
+import { type Wording, apiLevelMismatchMessage, unauthorizedMessage, unreachableMessage } from "./messages.js";
 import { mimeTypeFor } from "./mime.js";
 
 /** The upload contract this bridge speaks. The app answers 409 when it no longer matches. */
@@ -57,6 +57,10 @@ export interface UploadOptions {
   maxBytes?: number;
   /** What to say on a 401; the connect-by-sentence bridge asks for a new sentence instead of a new command. */
   unauthorizedMessage?: string;
+  /** What the user copies from the phone, for the can't-reach message. */
+  wording?: Wording;
+  /** Called when the app refuses the token (HTTP 401): the connection is over. */
+  onUnauthorized?: () => void;
 }
 
 export async function addAttachmentFromPath(args: unknown, options: UploadOptions): Promise<CallToolResult> {
@@ -108,14 +112,17 @@ export async function addAttachmentFromPath(args: unknown, options: UploadOption
       signal: AbortSignal.timeout(options.timeoutMs ?? 300_000),
     });
   } catch (error) {
-    return failure(unreachableMessage(options.baseUrl, error));
+    return failure(unreachableMessage(options.baseUrl, error, options.wording));
   }
 
   const text = await response.text();
   const json = parseObject(text);
 
   if (response.status === 409) return failure(apiLevelMismatchMessage(errorText(json)));
-  if (response.status === 401) return failure(options.unauthorizedMessage ?? unauthorizedMessage());
+  if (response.status === 401) {
+    options.onUnauthorized?.();
+    return failure(options.unauthorizedMessage ?? unauthorizedMessage());
+  }
   if (!response.ok) {
     return failure(`The TripEZGo app refused the upload (HTTP ${response.status}): ${errorText(json) ?? (text.trim() || "no details")}`);
   }

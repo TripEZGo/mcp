@@ -1,4 +1,7 @@
-import { execFile } from "node:child_process";
+import { execFile, execFileSync } from "node:child_process";
+import { existsSync, readFileSync } from "node:fs";
+import { createServer } from "node:http";
+import type { AddressInfo } from "node:net";
 import { chmod, cp, mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
@@ -7,11 +10,13 @@ import { promisify } from "node:util";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { stableNodePath } from "../src/install.js";
 import { FakeApp, json, type RecordedRequest } from "./fakeApp.js";
 
 const REPO = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const TOKEN = "e2e-token";
 const run = promisify(execFile);
+const VERSION: string = JSON.parse(readFileSync(join(REPO, "package.json"), "utf8")).version;
 
 const APP_TOOLS = [
   { name: "list_trips", description: "List trips", inputSchema: { type: "object", properties: {} } },
@@ -81,7 +86,7 @@ describe("the bundle with no arguments, under the official MCP SDK client", () =
     client = new Client({ name: "claude-code", version: "9.9.9" });
     await client.connect(new StdioClientTransport({ command: process.execPath, args: [join(dir, "pkg", "dist", "cli.js")], stderr: "ignore" }));
 
-    expect(client.getServerVersion()).toEqual({ name: "TripEZGo", version: "0.2.0" });
+    expect(client.getServerVersion()).toEqual({ name: "TripEZGo", version: VERSION });
     expect(client.getInstructions()).toMatch(/connect/);
 
     const { tools } = await client.listTools();
@@ -141,6 +146,64 @@ describe("the bundle with no arguments, under the official MCP SDK client", () =
     expect(text(await client.callTool({ name: "list_trips", arguments: {} }))).toBe('{"trips":[]}');
     expect(await readFile(join(skillDir, "SKILL.md"), "utf8")).toBe(await readFile(join(REPO, "skills", "tripezgo", "SKILL.md"), "utf8"));
   });
+
+  it("starts at once on the cached version when a newer tag exists, and has the newer one cached for the next start", async () => {
+    const home = join(dir, ".tripezgo");
+    await mkdir(home, { recursive: true });
+    await cp(join(REPO, "dist", "launcher.mjs"), join(home, "launcher.mjs"));
+    await release(join(home, "versions", "v0.2.0"));
+
+    // The newer release, as codeload serves it, reporting itself as 9.9.9.
+    const src = join(dir, "release-src");
+    await release(join(src, "mcp-9.9.9"));
+    await writeFile(join(src, "mcp-9.9.9", "package.json"), '{"name":"tripezgo-mcp","version":"9.9.9"}');
+    execFileSync("tar", ["-czf", join(dir, "r.tgz"), "-C", src, "mcp-9.9.9"]);
+    const archive = await readFile(join(dir, "r.tgz"));
+
+    // A stand-in GitHub whose download takes 3 s: a launcher that waited for it would start 3 s late.
+    let tarballServedAt = Number.POSITIVE_INFINITY;
+    const github = createServer((req, res) => {
+      if (req.url?.startsWith("/repos/TripEZGo/mcp/tags")) {
+        res.writeHead(200, { "Content-Type": "application/json" });
+        res.end(JSON.stringify([{ name: "v0.2.0" }, { name: "v9.9.9" }]));
+      } else if (req.url === "/TripEZGo/mcp/tar.gz/refs/tags/v9.9.9") {
+        setTimeout(() => {
+          tarballServedAt = Date.now();
+          res.writeHead(200);
+          res.end(archive);
+        }, 3000);
+      } else {
+        res.writeHead(404);
+        res.end();
+      }
+    });
+    await new Promise<void>((r) => github.listen(0, "127.0.0.1", r));
+    const base = `http://127.0.0.1:${(github.address() as AddressInfo).port}`;
+    const env = { ...process.env, TRIPEZGO_UPDATE_BASE: base } as Record<string, string>;
+    delete env.TRIPEZGO_NO_UPDATE;
+
+    try {
+      client = new Client({ name: "claude-code", version: "9.9.9" });
+      await client.connect(new StdioClientTransport({ command: process.execPath, args: [join(home, "launcher.mjs")], env, stderr: "ignore" }));
+      const initializedAt = Date.now();
+
+      expect(client.getServerVersion()).toEqual({ name: "TripEZGo", version: VERSION });
+      expect(initializedAt).toBeLessThan(tarballServedAt);
+      await client.close();
+
+      const deadline = Date.now() + 15_000;
+      while (!existsSync(join(home, "versions", "v9.9.9", "dist", "cli.js")) && Date.now() < deadline) {
+        await new Promise((r) => setTimeout(r, 100));
+      }
+      expect(existsSync(join(home, "versions", "v9.9.9", "dist", "cli.js"))).toBe(true);
+
+      client = new Client({ name: "claude-code", version: "9.9.9" });
+      await client.connect(new StdioClientTransport({ command: process.execPath, args: [join(home, "launcher.mjs")], env, stderr: "ignore" }));
+      expect(client.getServerVersion()).toEqual({ name: "TripEZGo", version: "9.9.9" });
+    } finally {
+      github.close();
+    }
+  }, 30_000);
 });
 
 describe("the bundled installer, in a temporary HOME", () => {
@@ -169,9 +232,9 @@ describe("the bundled installer, in a temporary HOME", () => {
     const claude = await run(process.execPath, [cli, "install", "claude-code"], { env });
     expect(claude.stdout).toMatch(/installed for Claude Code/);
     const launcher = join(home, ".tripezgo", "launcher.mjs");
-    expect(await readFile(calls, "utf8")).toContain(`mcp add -s user tripezgo -- ${process.execPath} ${launcher}`);
+    expect(await readFile(calls, "utf8")).toContain(`mcp add -s user tripezgo -- ${stableNodePath(process.execPath)} ${launcher}`);
     expect(await readFile(join(home, ".claude", "skills", "tripezgo", "SKILL.md"), "utf8")).toMatch(/TripEZGo/);
-    expect(await readFile(join(home, ".tripezgo", "versions", "v0.2.0", "dist", "cli.js"), "utf8")).toBe(
+    expect(await readFile(join(home, ".tripezgo", "versions", `v${VERSION}`, "dist", "cli.js"), "utf8")).toBe(
       await readFile(cli, "utf8"),
     );
 
@@ -183,7 +246,7 @@ describe("the bundled installer, in a temporary HOME", () => {
       const desktop = JSON.parse(
         await readFile(join(home, "Library", "Application Support", "Claude", "claude_desktop_config.json"), "utf8"),
       );
-      expect(desktop.mcpServers.tripezgo).toEqual({ command: process.execPath, args: [launcher] });
+      expect(desktop.mcpServers.tripezgo).toEqual({ command: stableNodePath(process.execPath), args: [launcher] });
     }
 
     const config = JSON.parse(await readFile(join(home, ".tripezgo", "config.json"), "utf8"));

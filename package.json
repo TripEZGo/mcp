@@ -1,6 +1,6 @@
 {
   "name": "tripezgo-mcp",
-  "version": "0.2.0",
+  "version": "0.2.1",
   "description": "Install-once MCP server and trip-planning skill for the TripEZGo iPhone app: connects by a sentence pasted from the phone, updates itself",
   "license": "MIT",
   "author": "TripEZGo",

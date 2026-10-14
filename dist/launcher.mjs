@@ -2,6 +2,8 @@
 // TripEZGo launcher: https://github.com/TripEZGo/mcp — updates itself from the release tags.
 
 // src/launcher.ts
+import { spawn } from "node:child_process";
+import { appendFileSync } from "node:fs";
 import { dirname as dirname2, join as join3 } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 
@@ -71,32 +73,53 @@ var tarballUrl = (tag) => `https://codeload.github.com/${REPO}/tar.gz/refs/tags/
 var MIN_TAG = "v0.2.0";
 var ENTRY = join2("dist", "cli.js");
 var KEEP_VERSIONS = 2;
+function sourcesAt(base) {
+  const root = base.replace(/\/+$/, "");
+  return {
+    tags: `${root}/repos/${REPO}/tags?per_page=100`,
+    tarball: (tag) => `${root}/${REPO}/tar.gz/refs/tags/${tag}`
+  };
+}
 async function prepareVersion(deps) {
   const versions = join2(deps.home, "versions");
-  if (deps.checkForUpdates !== false) {
-    const latest = await latestTag(deps);
-    if (latest && !isComplete(join2(versions, latest))) {
-      try {
-        await download(deps, latest);
-        deps.log(`updated to ${latest}`);
-      } catch (error) {
-        deps.log(`couldn't download ${latest} (${describe(error)}); using the cached version`);
-      }
+  let cached = await cachedTags(versions);
+  if (cached.length === 0) {
+    if (deps.checkForUpdates === false) return void 0;
+    await updateCache(deps);
+    cached = await cachedTags(versions);
+    if (cached.length === 0) return void 0;
+  } else if (deps.checkForUpdates !== false) {
+    try {
+      deps.startBackgroundUpdate?.();
+    } catch (error) {
+      deps.log(`couldn't start the background update (${describe(error)})`);
     }
   }
-  const cached = await cachedTags(versions);
-  if (cached.length === 0) return void 0;
   const picked2 = { tag: cached[0], dir: join2(versions, cached[0]) };
-  for (const old of cached.slice(KEEP_VERSIONS)) {
-    await rm2(join2(versions, old), { recursive: true, force: true }).catch(() => void 0);
-  }
-  await sweepStaleTemp(join2(deps.home, "tmp"));
   await syncSkills(deps, picked2);
   return picked2;
 }
+async function updateCache(deps) {
+  const versions = join2(deps.home, "versions");
+  const latest = await latestTag(deps);
+  const newestCached = (await cachedTags(versions))[0];
+  if (latest && (!newestCached || compareTags(latest, newestCached) > 0)) {
+    try {
+      await download(deps, latest);
+      deps.log(`downloaded ${latest}; it runs from the next start`);
+    } catch (error) {
+      deps.log(`couldn't download ${latest} (${describe(error)}); keeping the cached version`);
+    }
+  }
+  for (const old of (await cachedTags(versions)).slice(KEEP_VERSIONS)) {
+    await rm2(join2(versions, old), { recursive: true, force: true }).catch(() => void 0);
+  }
+  await sweepStaleTemp(join2(deps.home, "tmp"));
+  return latest;
+}
 async function latestTag(deps) {
   try {
-    const response = await deps.fetch(TAGS_URL, {
+    const response = await deps.fetch(deps.sources?.tags ?? TAGS_URL, {
       headers: { Accept: "application/vnd.github+json", "User-Agent": "tripezgo-launcher" },
       signal: AbortSignal.timeout(deps.tagsTimeoutMs ?? 2e3)
     });
@@ -116,7 +139,7 @@ async function download(deps, tag) {
   const temp = join2(deps.home, "tmp", `${tag}-${process.pid}-${randomBytes2(4).toString("hex")}`);
   try {
     await mkdir2(join2(temp, "x"), { recursive: true });
-    const response = await deps.fetch(tarballUrl(tag), {
+    const response = await deps.fetch(deps.sources?.tarball(tag) ?? tarballUrl(tag), {
       headers: { "User-Agent": "tripezgo-launcher" },
       signal: AbortSignal.timeout(deps.downloadTimeoutMs ?? 2e4)
     });
@@ -208,13 +231,33 @@ function describe(error) {
 }
 
 // src/launcher.ts
+var self = fileURLToPath(import.meta.url);
+var home = dirname2(self);
+var sources = process.env.TRIPEZGO_UPDATE_BASE ? sourcesAt(process.env.TRIPEZGO_UPDATE_BASE) : void 0;
+if (process.argv[2] === "--update") {
+  const log2 = (message) => {
+    try {
+      appendFileSync(join3(home, "update.log"), `${(/* @__PURE__ */ new Date()).toISOString()} ${message}
+`);
+    } catch {
+    }
+  };
+  await updateCache({ home, fetch, log: log2, sources });
+  process.exit(0);
+}
 var log = (message) => process.stderr.write(`tripezgo-launcher: ${message}
 `);
 var picked = await prepareVersion({
-  home: dirname2(fileURLToPath(import.meta.url)),
+  home,
   fetch,
   log,
-  checkForUpdates: process.env.TRIPEZGO_NO_UPDATE !== "1"
+  sources,
+  checkForUpdates: process.env.TRIPEZGO_NO_UPDATE !== "1",
+  startBackgroundUpdate: () => {
+    const child = spawn(process.execPath, [self, "--update"], { detached: true, stdio: "ignore", windowsHide: true });
+    child.on("error", (error) => log(`background update didn't start (${error.message})`));
+    child.unref();
+  }
 });
 if (!picked) {
   log(
