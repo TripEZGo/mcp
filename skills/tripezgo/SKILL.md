@@ -1,12 +1,13 @@
 ---
 name: tripezgo
-description: Plan trips and work in the TripEZGo iPhone app through its MCP server. Use when the user wants a trip planned or an itinerary drafted (any destination), or wants to read or change anything in TripEZGo — trips, events, legs, to-dos, notes, markers, shopping list, attachments — or pastes a TripEZGo connect sentence in any of its languages: 「連接 TripEZGo：IP:PORT，金鑰 …」, 「连接 TripEZGo：IP:PORT，密钥 …」, "Connect to TripEZGo: IP:PORT, key …", 「TripEZGo に接続：IP:PORT、キー …」, "TripEZGo 연결: IP:PORT, 키 …".
+description: Plan trips and work in the TripEZGo iPhone app through its MCP server. Use when the user wants a trip planned or an itinerary drafted (any destination), or wants to read or change anything in TripEZGo — trips, events, legs, to-dos, notes, markers, shopping list, attachments, inspirations — or pastes a TripEZGo connect sentence in any of its languages: 「連接 TripEZGo：IP:PORT，金鑰 …」, 「连接 TripEZGo：IP:PORT，密钥 …」, "Connect to TripEZGo: IP:PORT, key …", 「TripEZGo に接続：IP:PORT、キー …」, "TripEZGo 연결: IP:PORT, 키 …".
 ---
 
 # TripEZGo
 
 TripEZGo is a travel-planning iPhone app: one trip at a time on the phone, each with a day-by-day calendar of
-events, travel legs between events, and to-dos, files, notes, a shopping list and map markers. The `tripezgo`
+events, travel legs between events, and to-dos, files, notes, a shopping list, map markers and inspirations
+(links, text, photos and files the user saved from other apps and has not decided on yet). The `tripezgo`
 MCP server reaches the app on the user's iPhone over the same Wi-Fi, and through it **all** of the user's trips.
 
 ## Connecting
@@ -59,10 +60,19 @@ default — `create_trip` first or pass `tripId`. `create_trip` makes the new tr
 phone shows. Once a trip is chosen, pass its `tripId` explicitly. Read it with `get_trip` and `list_events`
 before changing it.
 
-**Permissions.** `canEditContent` gates events, legs, to-dos, shopping, markers, attachments and notes;
-`canEditTripInfo` gates name, dates, main place and time zone. The demo trip and read-only shared trips allow
-neither; a trip someone else shared allows content only. A refused write answers with why — tell the user
-rather than retrying.
+**Permissions.** `canEditContent` gates events, legs, to-dos, shopping, markers, attachments, notes and
+inspirations; `canEditTripInfo` gates name, dates, main place and time zone. The demo trip and read-only shared
+trips allow neither; a trip someone else shared allows content only. Marking an inspiration read or unread is
+the user's own and works on any trip. A refused write answers with why — tell the user rather than retrying.
+
+**Inspirations.** `list_inspirations` (filter by `status` unprocessed / processed, `categories`, `types`) and
+`get_inspiration` read what the user saved; `create_inspiration` saves a link or text (the app reads the page
+in the background). `add_inspiration_to` turns one into an `event` (a free slot by the app's rule, or the
+`date`/`dayNumber` + `startTime` you give), a `note`, a `shopping` item, an `attachment` (on `eventId`, or a
+key attachment) or a `marker`, and marks it processed; one that does not fit (no place for a marker, nothing to
+attach, no name or picture for shopping) is refused with the reason. `set_inspiration_read` and
+`set_inspiration_processed` change the two states. Suggest what to do with unprocessed ones when planning, and
+ask before adding them anywhere.
 
 **Formats.** Dates `YYYY-MM-DD`; times `HH:mm`, 24-hour, in the **trip's** time zone (from `get_trip`), never
 the computer's. Days are `dayNumber` (day 1 = first day) or a `date` inside the trip; a trip with undecided
