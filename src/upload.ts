@@ -1,6 +1,6 @@
-import { readFile, stat } from "node:fs/promises";
+import { readFile, realpath, stat } from "node:fs/promises";
 import { homedir } from "node:os";
-import { basename, resolve } from "node:path";
+import { basename, join, resolve, sep } from "node:path";
 import type { CallToolResult, Tool } from "./protocol.js";
 import { type Wording, apiLevelMismatchMessage, unauthorizedMessage, unreachableMessage } from "./messages.js";
 import { mimeTypeFor } from "./mime.js";
@@ -69,7 +69,20 @@ export async function addAttachmentFromPath(args: unknown, options: UploadOption
   if (typeof rawPath !== "string" || rawPath.trim() === "") {
     return failure("`path` is required: the path of the file on this computer.");
   }
-  const filePath = expandPath(rawPath.trim());
+  const requested = expandPath(rawPath.trim());
+
+  // Judge the real location, not the name given: a symlink or `..` can't smuggle a secret past the rules.
+  let filePath: string;
+  try {
+    filePath = await realpath(requested);
+  } catch (error) {
+    if (!isErrno(error, "ENOENT")) return failure(`Can't read ${requested}: ${(error as Error).message}`);
+    // Nothing there to resolve: judge the spelled path so a secret folder never reveals what it does (not) hold.
+    const refusal = await sensitivePathRefusal(requested);
+    return failure(refusal ?? `No file at ${requested}.`);
+  }
+  const refusal = await sensitivePathRefusal(filePath);
+  if (refusal) return failure(refusal);
 
   let size: number;
   try {
@@ -143,6 +156,40 @@ export async function addAttachmentFromPath(args: unknown, options: UploadOption
 
 function failure(message: string): CallToolResult {
   return { content: [{ type: "text", text: message }], isError: true };
+}
+
+/** Under the home folder, where credentials live (besides every dot folder, which is refused wholesale). */
+const SENSITIVE_HOME_FOLDERS = [".ssh", ".aws", ".gnupg", ".config", join("Library", "Keychains")];
+
+const WHY =
+  "Hidden files and folders and credential stores (~/.ssh, ~/.aws, ~/.gnupg, ~/.config, ~/Library/Keychains) hold " +
+  "keys, tokens and passwords, so add_attachment_from_path never reads them: an AI that was tricked by text in " +
+  "a web page, file or tool result could otherwise upload them to the phone. If the user really wants this " +
+  "file attached, they can copy it to an ordinary folder themselves and give that path.";
+
+/** The reason to refuse an already resolved absolute path, or undefined when it is fine to read. */
+async function sensitivePathRefusal(path: string): Promise<string | undefined> {
+  const hidden = path.split(sep).find((part) => part.startsWith(".") && part !== "." && part !== "..");
+  if (hidden) return `Refusing to read ${path}: "${hidden}" is a hidden (dot) file or folder. ${WHY}`;
+
+  // The home folder may itself be reached through a symlink, so compare against both spellings.
+  const homes = new Set([homedir()]);
+  try {
+    homes.add(await realpath(homedir()));
+  } catch {
+    // no home to resolve
+  }
+  // macOS volumes ignore case, so `~/library/keychains` is the same folder.
+  const fold = (value: string) => (process.platform === "darwin" || process.platform === "win32" ? value.toLowerCase() : value);
+  for (const home of homes) {
+    for (const folder of SENSITIVE_HOME_FOLDERS) {
+      const guarded = join(home, folder);
+      if (fold(path) === fold(guarded) || fold(path).startsWith(fold(guarded) + sep)) {
+        return `Refusing to read ${path}: it is inside ~/${folder.split(sep).join("/")}. ${WHY}`;
+      }
+    }
+  }
+  return undefined;
 }
 
 function expandPath(path: string): string {

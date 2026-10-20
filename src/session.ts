@@ -1,4 +1,4 @@
-import { ConfigError, normalizeBaseUrl } from "./config.js";
+import { ConfigError, assertPrivateAddress, normalizeBaseUrl } from "./config.js";
 import type { PlanningGuide } from "./guide.js";
 import {
   CONNECT_HOWTO,
@@ -65,6 +65,8 @@ export interface SessionBridgeOptions {
   timeoutMs?: number;
   uploadTimeoutMs?: number;
   log?: (message: string) => void;
+  /** Lets `connect` reach 127.0.0.0/8. Only tests that run a fake app on this machine set it; the CLI never does. */
+  allowLoopback?: boolean;
 }
 
 interface Connection {
@@ -189,6 +191,7 @@ export class SessionBridge {
     }
     let baseUrl: string;
     try {
+      assertPrivateAddress(address, { allowLoopback: this.options.allowLoopback });
       baseUrl = normalizeBaseUrl(address);
     } catch (error) {
       if (error instanceof ConfigError) return toolFailure(`${error.message}. The address looks like 192.168.1.23:8765.`);

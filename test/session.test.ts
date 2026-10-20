@@ -191,7 +191,7 @@ describe("SessionBridge connect", () => {
     app = new FakeApp();
     app.handler = appHandler();
     baseUrl = await app.start();
-    bridge = new SessionBridge({ appTools: SNAPSHOT, guide: GUIDE, version: "0.2.0" });
+    bridge = new SessionBridge({ appTools: SNAPSHOT, guide: GUIDE, version: "0.2.0", allowLoopback: true });
     await bridge.handle(JSON.stringify(CLIENT_INIT));
   });
 

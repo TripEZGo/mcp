@@ -11,7 +11,11 @@ import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { stableNodePath } from "../src/install.js";
-import { FakeApp, json, type RecordedRequest } from "./fakeApp.js";
+import { RELEASE_PUBLIC_KEY } from "../src/launcherCore.js";
+import { testKey } from "./signing.js";
+import { FakeApp, json, privateLanIPv4, type RecordedRequest } from "./fakeApp.js";
+
+const LAN = privateLanIPv4();
 
 const REPO = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const TOKEN = "e2e-token";
@@ -71,7 +75,8 @@ describe("the bundle with no arguments, under the official MCP SDK client", () =
   beforeEach(async () => {
     app = new FakeApp();
     app.handler = fakeMcp;
-    baseUrl = await app.start();
+    // `connect` refuses loopback, so the fake app listens on this machine's private LAN address (when it has one).
+    baseUrl = await app.start(LAN ?? "127.0.0.1");
     dir = await mkdtemp(join(tmpdir(), "tripezgo-e2e-once-"));
     await release(join(dir, "pkg"));
   });
@@ -82,7 +87,7 @@ describe("the bundle with no arguments, under the official MCP SDK client", () =
     await rm(dir, { recursive: true, force: true });
   });
 
-  it("starts unconnected, lists the snapshot, refuses app tools until connect, then forwards them", async () => {
+  it.skipIf(!LAN)("starts unconnected, lists the snapshot, refuses app tools until connect, then forwards them", async () => {
     client = new Client({ name: "claude-code", version: "9.9.9" });
     await client.connect(new StdioClientTransport({ command: process.execPath, args: [join(dir, "pkg", "dist", "cli.js")], stderr: "ignore" }));
 
@@ -122,7 +127,7 @@ describe("the bundle with no arguments, under the official MCP SDK client", () =
     ]);
   });
 
-  it("runs through the launcher from a cached version, offline, and refreshes the installed skill", async () => {
+  it.skipIf(!LAN)("runs through the launcher from a cached version, offline, and refreshes the installed skill", async () => {
     const home = join(dir, ".tripezgo");
     await mkdir(home, { recursive: true });
     await cp(join(REPO, "dist", "launcher.mjs"), join(home, "launcher.mjs"));
@@ -150,10 +155,15 @@ describe("the bundle with no arguments, under the official MCP SDK client", () =
   it("starts at once on the cached version when a newer tag exists, and has the newer one cached for the next start", async () => {
     const home = join(dir, ".tripezgo");
     await mkdir(home, { recursive: true });
-    await cp(join(REPO, "dist", "launcher.mjs"), join(home, "launcher.mjs"));
+    // The built launcher with a throwaway public key swapped in for the hard-coded one, so the release below
+    // can be signed without the real private key.
+    const key = testKey();
+    const built = await readFile(join(REPO, "dist", "launcher.mjs"), "utf8");
+    expect(built).toContain(RELEASE_PUBLIC_KEY);
+    await writeFile(join(home, "launcher.mjs"), built.replace(RELEASE_PUBLIC_KEY, key.publicKey));
     await release(join(home, "versions", "v0.2.0"));
 
-    // The newer release, as codeload serves it, reporting itself as 9.9.9.
+    // The newer release, as the signed release asset, reporting itself as 9.9.9.
     const src = join(dir, "release-src");
     await release(join(src, "mcp-9.9.9"));
     await writeFile(join(src, "mcp-9.9.9", "package.json"), '{"name":"tripezgo-mcp","version":"9.9.9"}');
@@ -166,7 +176,10 @@ describe("the bundle with no arguments, under the official MCP SDK client", () =
       if (req.url?.startsWith("/repos/TripEZGo/mcp/tags")) {
         res.writeHead(200, { "Content-Type": "application/json" });
         res.end(JSON.stringify([{ name: "v0.2.0" }, { name: "v9.9.9" }]));
-      } else if (req.url === "/TripEZGo/mcp/tar.gz/refs/tags/v9.9.9") {
+      } else if (req.url === "/TripEZGo/mcp/releases/download/v9.9.9/tripezgo-mcp-v9.9.9.tar.gz.minisig") {
+        res.writeHead(200);
+        res.end(key.sign(archive));
+      } else if (req.url === "/TripEZGo/mcp/releases/download/v9.9.9/tripezgo-mcp-v9.9.9.tar.gz") {
         setTimeout(() => {
           tarballServedAt = Date.now();
           res.writeHead(200);

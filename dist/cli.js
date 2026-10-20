@@ -2,7 +2,7 @@
 
 // src/cli.ts
 import { homedir as homedir2 } from "node:os";
-import { join as join5 } from "node:path";
+import { join as join6 } from "node:path";
 
 // src/messages.ts
 function unreachableMessage(baseUrl, cause, wording = "command") {
@@ -91,9 +91,9 @@ function rpcBodies(text, contentType) {
 }
 
 // src/upload.ts
-import { readFile, stat } from "node:fs/promises";
+import { readFile, realpath, stat } from "node:fs/promises";
 import { homedir } from "node:os";
-import { basename, resolve } from "node:path";
+import { basename, join, resolve, sep } from "node:path";
 
 // src/mime.ts
 import { extname } from "node:path";
@@ -179,7 +179,17 @@ async function addAttachmentFromPath(args, options) {
   if (typeof rawPath !== "string" || rawPath.trim() === "") {
     return failure("`path` is required: the path of the file on this computer.");
   }
-  const filePath = expandPath(rawPath.trim());
+  const requested = expandPath(rawPath.trim());
+  let filePath;
+  try {
+    filePath = await realpath(requested);
+  } catch (error) {
+    if (!isErrno(error, "ENOENT")) return failure(`Can't read ${requested}: ${error.message}`);
+    const refusal2 = await sensitivePathRefusal(requested);
+    return failure(refusal2 ?? `No file at ${requested}.`);
+  }
+  const refusal = await sensitivePathRefusal(filePath);
+  if (refusal) return failure(refusal);
   let size;
   try {
     const info = await stat(filePath);
@@ -246,6 +256,27 @@ ${text.trim()}`
 }
 function failure(message) {
   return { content: [{ type: "text", text: message }], isError: true };
+}
+var SENSITIVE_HOME_FOLDERS = [".ssh", ".aws", ".gnupg", ".config", join("Library", "Keychains")];
+var WHY = "Hidden files and folders and credential stores (~/.ssh, ~/.aws, ~/.gnupg, ~/.config, ~/Library/Keychains) hold keys, tokens and passwords, so add_attachment_from_path never reads them: an AI that was tricked by text in a web page, file or tool result could otherwise upload them to the phone. If the user really wants this file attached, they can copy it to an ordinary folder themselves and give that path.";
+async function sensitivePathRefusal(path) {
+  const hidden = path.split(sep).find((part) => part.startsWith(".") && part !== "." && part !== "..");
+  if (hidden) return `Refusing to read ${path}: "${hidden}" is a hidden (dot) file or folder. ${WHY}`;
+  const homes = /* @__PURE__ */ new Set([homedir()]);
+  try {
+    homes.add(await realpath(homedir()));
+  } catch {
+  }
+  const fold = (value) => process.platform === "darwin" || process.platform === "win32" ? value.toLowerCase() : value;
+  for (const home of homes) {
+    for (const folder of SENSITIVE_HOME_FOLDERS) {
+      const guarded = join(home, folder);
+      if (fold(path) === fold(guarded) || fold(path).startsWith(fold(guarded) + sep)) {
+        return `Refusing to read ${path}: it is inside ~/${folder.split(sep).join("/")}. ${WHY}`;
+      }
+    }
+  }
+  return void 0;
 }
 function expandPath(path) {
   if (path === "~") return homedir();
@@ -377,16 +408,19 @@ var USAGE = `Usage:
   tripezgo-mcp
       Run the bridge on stdio. The AI connects with the sentence the iPhone shows
       (\u9023\u63A5 TripEZGo\uFF1AIP:PORT\uFF0C\u91D1\u9470 TOKEN) through the connect tool.
-  npx -y github:TripEZGo/mcp --url http://IP:PORT --token=TOKEN
+  TRIPEZGO_URL=http://IP:PORT TRIPEZGO_TOKEN=TOKEN npx -y github:TripEZGo/mcp
       Older app versions: bridge to one address and token, shown on the TripEZGo
-      "Connect computer AI" page. Also read from TRIPEZGO_URL, TRIPEZGO_TOKEN.`;
+      "Connect computer AI" page.
+  npx -y github:TripEZGo/mcp --url http://IP:PORT --token=TOKEN
+      Deprecated: --token puts the key in the process list for every user of this
+      computer to read. Use TRIPEZGO_TOKEN instead.`;
 var ConfigError = class extends Error {
 };
 var KNOWN_FLAGS = ["url", "token"];
 function isKnownFlag(arg) {
   return KNOWN_FLAGS.some((name) => arg === `--${name}` || arg.startsWith(`--${name}=`));
 }
-function parseConfig(argv2, env) {
+function parseConfig(argv2, env, warn) {
   const flags = /* @__PURE__ */ new Map();
   const set = (name, value) => {
     if (flags.has(name)) throw new ConfigError(`--${name} given more than once`);
@@ -414,6 +448,9 @@ function parseConfig(argv2, env) {
       throw new ConfigError(`Unknown option: --${key}`);
     }
   }
+  if (flags.has("token")) {
+    warn?.("--token is deprecated: a command-line argument is visible in the process list. Set TRIPEZGO_TOKEN instead.");
+  }
   const rawUrl = (flags.get("url") ?? env.TRIPEZGO_URL ?? "").trim();
   const token = (flags.get("token") ?? env.TRIPEZGO_TOKEN ?? "").trim();
   if (!rawUrl && !token) return void 0;
@@ -432,21 +469,50 @@ function normalizeBaseUrl(raw) {
   const path = url.pathname.replace(/\/+$/, "").replace(/\/mcp$/, "");
   return `${url.protocol}//${url.host}${path}`;
 }
+var PRIVATE_RANGES_TEXT = "10.0.0.0/8, 172.16.0.0/12, 192.168.0.0/16, 169.254.0.0/16, or Tailscale 100.64.0.0/10";
+function parseIPv4Literal(host) {
+  const match = /^(0|[1-9]\d{0,2})\.(0|[1-9]\d{0,2})\.(0|[1-9]\d{0,2})\.(0|[1-9]\d{0,2})$/.exec(host);
+  if (!match) return void 0;
+  const octets = match.slice(1).map(Number);
+  return octets.every((octet) => octet <= 255) ? octets : void 0;
+}
+function isPrivateIPv4([a, b], allowLoopback) {
+  return a === 10 || a === 172 && b >= 16 && b <= 31 || a === 192 && b === 168 || a === 169 && b === 254 || a === 100 && b >= 64 && b <= 127 || allowLoopback && a === 127;
+}
+function assertPrivateAddress(raw, options = {}) {
+  const reject = (why) => {
+    throw new ConfigError(
+      `${why}. TripEZGo connects only to a literal IPv4 address on a private network (${PRIVATE_RANGES_TEXT}), the one the iPhone shows; hostnames and public addresses are refused on purpose`
+    );
+  };
+  const match = /^(?:([a-z][a-z0-9+.-]*):\/\/)?([^/?#]*)([/?#].*)?$/i.exec(raw.trim());
+  if (!match) return reject(`Not a usable address: ${raw}`);
+  const [, scheme, authority] = match;
+  if (scheme && !/^https?$/i.test(scheme)) return reject(`Not an http(s) address: ${raw}`);
+  if (authority.includes("@") || authority.includes("[")) return reject(`Not a plain IPv4 address: ${raw}`);
+  const colon = authority.lastIndexOf(":");
+  const host = colon === -1 ? authority : authority.slice(0, colon);
+  const port = colon === -1 ? "" : authority.slice(colon + 1);
+  if (port !== "" && !/^\d{1,5}$/.test(port)) return reject(`Not a valid port in ${raw}`);
+  const octets = parseIPv4Literal(host);
+  if (!octets) return reject(`"${host}" is a hostname or not a plain IPv4 address`);
+  if (!isPrivateIPv4(octets, options.allowLoopback === true)) return reject(`${host} is not a private network address`);
+}
 
 // src/guide.ts
 import { readFileSync, readdirSync } from "node:fs";
-import { join } from "node:path";
+import { join as join2 } from "node:path";
 function loadGuide(skillDir) {
   let skill;
   try {
-    skill = stripFrontMatter(readFileSync(join(skillDir, "SKILL.md"), "utf8")).trim();
+    skill = stripFrontMatter(readFileSync(join2(skillDir, "SKILL.md"), "utf8")).trim();
   } catch {
     return emptyGuide(`The planning guide is missing from this install (${skillDir}).`);
   }
   const references = /* @__PURE__ */ new Map();
   try {
-    for (const file of readdirSync(join(skillDir, "references")).filter((f) => f.endsWith(".md")).sort()) {
-      references.set(file.slice(0, -3), readFileSync(join(skillDir, "references", file), "utf8").trim());
+    for (const file of readdirSync(join2(skillDir, "references")).filter((f) => f.endsWith(".md")).sort()) {
+      references.set(file.slice(0, -3), readFileSync(join2(skillDir, "references", file), "utf8").trim());
     }
   } catch {
   }
@@ -473,16 +539,16 @@ function stripFrontMatter(text) {
 import { spawn } from "node:child_process";
 import { existsSync, realpathSync } from "node:fs";
 import { cp as cp2, mkdir as mkdir2, readFile as readFile3, rename as rename2, rm as rm2 } from "node:fs/promises";
-import { join as join3 } from "node:path";
+import { join as join4 } from "node:path";
 import { randomBytes as randomBytes2 } from "node:crypto";
 
 // src/fsutil.ts
 import { randomBytes } from "node:crypto";
 import { cp, mkdir, readFile as readFile2, rename, rm, writeFile } from "node:fs/promises";
-import { basename as basename2, dirname, join as join2 } from "node:path";
+import { basename as basename2, dirname, join as join3 } from "node:path";
 var SKILL_MARKER = ".tripezgo-version";
 function siblingTemp(path) {
-  return join2(dirname(path), `.${basename2(path)}.tmp-${process.pid}-${randomBytes(4).toString("hex")}`);
+  return join3(dirname(path), `.${basename2(path)}.tmp-${process.pid}-${randomBytes(4).toString("hex")}`);
 }
 async function writeFileAtomic(path, data, mode) {
   await mkdir(dirname(path), { recursive: true });
@@ -500,7 +566,7 @@ async function replaceDir(src, dest, marker) {
   const temp = siblingTemp(dest);
   try {
     await cp(src, temp, { recursive: true });
-    if (marker !== void 0) await writeFile(join2(temp, SKILL_MARKER), `${marker}
+    if (marker !== void 0) await writeFile(join3(temp, SKILL_MARKER), `${marker}
 `);
     await rm(dest, { recursive: true, force: true });
     await rename(temp, dest);
@@ -532,13 +598,13 @@ async function runInstall(args, deps) {
     deps.out(INSTALL_USAGE);
     return 2;
   }
-  const home = join3(deps.home, ".tripezgo");
-  const launcher = join3(home, "launcher.mjs");
+  const home = join4(deps.home, ".tripezgo");
+  const launcher = join4(home, "launcher.mjs");
   const tag = `v${deps.version}`;
   const summary = [];
   try {
     await mkdir2(home, { recursive: true });
-    await writeFileAtomic(launcher, await readFile3(join3(deps.packageRoot, "dist", "launcher.mjs")));
+    await writeFileAtomic(launcher, await readFile3(join4(deps.packageRoot, "dist", "launcher.mjs")));
     summary.push(`Launcher: ${launcher}`);
     summary.push(`Cached ${tag}: ${await seedVersion(home, tag, deps.packageRoot) ? "added" : "already there"}`);
     let skillDir;
@@ -546,11 +612,11 @@ async function runInstall(args, deps) {
       case "claude-code": {
         const result = await installClaudeCode(deps, launcher, summary);
         if (result !== 0) return finish(deps, client, summary, result);
-        skillDir = join3(deps.home, ".claude", "skills", "tripezgo");
+        skillDir = join4(deps.home, ".claude", "skills", "tripezgo");
         break;
       }
       case "codex": {
-        const path = join3(deps.env.CODEX_HOME || join3(deps.home, ".codex"), "config.toml");
+        const path = join4(deps.env.CODEX_HOME || join4(deps.home, ".codex"), "config.toml");
         let toml = "";
         try {
           toml = await readFile3(path, "utf8");
@@ -559,7 +625,7 @@ async function runInstall(args, deps) {
         }
         await writeFileAtomic(path, upsertCodexServer(toml, deps.nodePath, [launcher]));
         summary.push(`Codex MCP server "tripezgo": ${path}`);
-        skillDir = join3(deps.home, ".agents", "skills", "tripezgo");
+        skillDir = join4(deps.home, ".agents", "skills", "tripezgo");
         break;
       }
       case "claude-desktop": {
@@ -569,12 +635,12 @@ async function runInstall(args, deps) {
       }
     }
     if (skillDir) {
-      await replaceDir(join3(deps.packageRoot, "skills", "tripezgo"), skillDir, tag);
+      await replaceDir(join4(deps.packageRoot, "skills", "tripezgo"), skillDir, tag);
       summary.push(`Planning skill: ${skillDir}`);
     } else {
       summary.push("Planning guide: served by the MCP server itself (get_planning_guide)");
     }
-    const configPath = join3(home, "config.json");
+    const configPath = join4(home, "config.json");
     const config = await readInstallConfig(configPath);
     config.clients[client] = { ...skillDir ? { skillDir } : {}, installedAt: (/* @__PURE__ */ new Date()).toISOString() };
     await writeFileAtomic(configPath, `${JSON.stringify(config, null, 2)}
@@ -608,16 +674,16 @@ function finish(deps, client, summary, code) {
   return code;
 }
 async function seedVersion(home, tag, packageRoot) {
-  const versions = join3(home, "versions");
-  const target = join3(versions, tag);
-  if (existsSync(join3(target, "dist", "cli.js"))) return false;
+  const versions = join4(home, "versions");
+  const target = join4(versions, tag);
+  if (existsSync(join4(target, "dist", "cli.js"))) return false;
   await mkdir2(versions, { recursive: true });
-  const temp = join3(home, "tmp", `seed-${process.pid}-${randomBytes2(4).toString("hex")}`);
+  const temp = join4(home, "tmp", `seed-${process.pid}-${randomBytes2(4).toString("hex")}`);
   try {
     await mkdir2(temp, { recursive: true });
     for (const entry of ["dist", "skills", "snapshot", "package.json"]) {
-      const from = join3(packageRoot, entry);
-      if (existsSync(from)) await cp2(from, join3(temp, entry), { recursive: true });
+      const from = join4(packageRoot, entry);
+      if (existsSync(from)) await cp2(from, join4(temp, entry), { recursive: true });
     }
     await rm2(target, { recursive: true, force: true });
     await rename2(temp, target);
@@ -694,9 +760,9 @@ async function installClaudeDesktop(deps, launcher, summary) {
 }
 function claudeDesktopConfigPath(deps) {
   const file = "claude_desktop_config.json";
-  if (deps.platform === "darwin") return join3(deps.home, "Library", "Application Support", "Claude", file);
-  if (deps.platform === "win32") return deps.env.APPDATA ? join3(deps.env.APPDATA, "Claude", file) : void 0;
-  return join3(deps.env.XDG_CONFIG_HOME || join3(deps.home, ".config"), "Claude", file);
+  if (deps.platform === "darwin") return join4(deps.home, "Library", "Application Support", "Claude", file);
+  if (deps.platform === "win32") return deps.env.APPDATA ? join4(deps.env.APPDATA, "Claude", file) : void 0;
+  return join4(deps.env.XDG_CONFIG_HOME || join4(deps.home, ".config"), "Claude", file);
 }
 function upsertCodexServer(toml, command, args) {
   const kept = [];
@@ -792,24 +858,24 @@ function runCommand(command, args) {
 
 // src/package.ts
 import { readFileSync as readFileSync2 } from "node:fs";
-import { dirname as dirname2, join as join4, resolve as resolve2 } from "node:path";
+import { dirname as dirname2, join as join5, resolve as resolve2 } from "node:path";
 import { fileURLToPath } from "node:url";
 function packageRootOf(moduleUrl) {
   return resolve2(dirname2(fileURLToPath(moduleUrl)), "..");
 }
 function packageVersion(root2) {
   try {
-    const pkg = JSON.parse(readFileSync2(join4(root2, "package.json"), "utf8"));
+    const pkg = JSON.parse(readFileSync2(join5(root2, "package.json"), "utf8"));
     return isObject(pkg) && typeof pkg.version === "string" ? pkg.version : "0.0.0";
   } catch {
     return "0.0.0";
   }
 }
-var SNAPSHOT_PATH = join4("snapshot", "app-tools.json");
-var SKILL_PATH = join4("skills", "tripezgo");
+var SNAPSHOT_PATH = join5("snapshot", "app-tools.json");
+var SKILL_PATH = join5("skills", "tripezgo");
 function loadAppToolSnapshot(root2, log2) {
   try {
-    const value = JSON.parse(readFileSync2(join4(root2, SNAPSHOT_PATH), "utf8"));
+    const value = JSON.parse(readFileSync2(join5(root2, SNAPSHOT_PATH), "utf8"));
     if (isObject(value) && Array.isArray(value.tools)) {
       return value.tools.filter((tool) => isObject(tool) && typeof tool.name === "string" && isObject(tool.inputSchema));
     }
@@ -929,6 +995,7 @@ var SessionBridge = class {
     }
     let baseUrl;
     try {
+      assertPrivateAddress(address, { allowLoopback: this.options.allowLoopback });
       baseUrl = normalizeBaseUrl(address);
     } catch (error) {
       if (error instanceof ConfigError) return toolFailure(`${error.message}. The address looks like 192.168.1.23:8765.`);
@@ -1139,7 +1206,7 @@ if (argv.includes("--help") || argv.includes("-h")) {
   process.exit(0);
 }
 try {
-  const config = parseConfig(argv, process.env);
+  const config = parseConfig(argv, process.env, log);
   if (config) {
     log(`bridging stdio to ${config.baseUrl}/mcp`);
     await runStdio(process.stdin, process.stdout, new Bridge({ ...config, log }));
@@ -1147,7 +1214,7 @@ try {
     log(`${version} started; waiting for the AI to connect`);
     const bridge = new SessionBridge({
       appTools: loadAppToolSnapshot(root, log),
-      guide: loadGuide(join5(root, SKILL_PATH)),
+      guide: loadGuide(join6(root, SKILL_PATH)),
       version,
       log
     });

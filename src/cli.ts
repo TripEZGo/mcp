@@ -35,7 +35,7 @@ if (argv.includes("--help") || argv.includes("-h")) {
 }
 
 try {
-  const config = parseConfig(argv, process.env);
+  const config = parseConfig(argv, process.env, log);
   if (config) {
     // Older app builds copy a command with the address and token in it: bridge to that one address.
     log(`bridging stdio to ${config.baseUrl}/mcp`);
