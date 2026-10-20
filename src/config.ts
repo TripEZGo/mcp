@@ -76,6 +76,8 @@ export function parseConfig(
   if (!rawUrl) throw new ConfigError("Missing --url (or TRIPEZGO_URL)");
   if (!token) throw new ConfigError("Missing --token (or TRIPEZGO_TOKEN)");
 
+  // The same rule as `connect`: the address, and the key sent to it, only ever go to a private-network IPv4.
+  assertPrivateAddress(rawUrl);
   return { baseUrl: normalizeBaseUrl(rawUrl), token };
 }
 

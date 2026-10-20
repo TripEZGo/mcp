@@ -456,6 +456,7 @@ function parseConfig(argv2, env, warn) {
   if (!rawUrl && !token) return void 0;
   if (!rawUrl) throw new ConfigError("Missing --url (or TRIPEZGO_URL)");
   if (!token) throw new ConfigError("Missing --token (or TRIPEZGO_TOKEN)");
+  assertPrivateAddress(rawUrl);
   return { baseUrl: normalizeBaseUrl(rawUrl), token };
 }
 function normalizeBaseUrl(raw) {

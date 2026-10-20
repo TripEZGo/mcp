@@ -4,7 +4,6 @@ import { existsSync } from "node:fs";
 import { mkdir, readdir, rename, rm, stat, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { compareTags, parseTag, readInstallConfig, readMarker, replaceDir } from "./fsutil.js";
-import { SignatureError, verifyMinisign } from "./signature.js";
 
 /**
  * What `~/.tripezgo/launcher.mjs` does on every start, before the bridge runs: find the newest release, cache
@@ -14,18 +13,7 @@ import { SignatureError, verifyMinisign } from "./signature.js";
 
 export const REPO = "TripEZGo/mcp";
 export const TAGS_URL = `https://api.github.com/repos/${REPO}/tags?per_page=100`;
-/**
- * The signed release tarball is a release asset (GitHub's own tag tarballs are generated on demand and can't be
- * signed), and `<name>.minisig` is its minisign signature.
- */
-export const tarballName = (tag: string) => `tripezgo-mcp-${tag}.tar.gz`;
-export const tarballUrl = (tag: string) => `https://github.com/${REPO}/releases/download/${tag}/${tarballName(tag)}`;
-export const signatureUrl = (tag: string) => `${tarballUrl(tag)}.minisig`;
-/**
- * The only key a downloaded release may be signed with (minisign public-key line; the private half stays with
- * the maintainer). A launcher never switches to a tarball this key didn't sign.
- */
-export const RELEASE_PUBLIC_KEY = "RWQOXh+Dq2IvfnB0D/U1BP3InZrPeHJ5BR8j6p6hllSgROq2+meR7aAn";
+export const tarballUrl = (tag: string) => `https://codeload.github.com/${REPO}/tar.gz/refs/tags/${tag}`;
 /** The first release whose tarball runs without `npm install`. */
 export const MIN_TAG = "v0.2.0";
 /** The file that proves a cached version is complete. */
@@ -50,14 +38,11 @@ export interface LauncherDeps {
   downloadTimeoutMs?: number;
   /** Where releases come from; GitHub unless overridden (TRIPEZGO_UPDATE_BASE, for testing a release). */
   sources?: ReleaseSources;
-  /** Overrides `RELEASE_PUBLIC_KEY`; for tests only. */
-  publicKey?: string;
 }
 
 export interface ReleaseSources {
   tags: string;
   tarball: (tag: string) => string;
-  signature: (tag: string) => string;
 }
 
 /** The GitHub API + codeload URL shapes under another origin, e.g. a local stand-in server. */
@@ -65,8 +50,7 @@ export function sourcesAt(base: string): ReleaseSources {
   const root = base.replace(/\/+$/, "");
   return {
     tags: `${root}/repos/${REPO}/tags?per_page=100`,
-    tarball: (tag) => `${root}/${REPO}/releases/download/${tag}/${tarballName(tag)}`,
-    signature: (tag) => `${root}/${REPO}/releases/download/${tag}/${tarballName(tag)}.minisig`,
+    tarball: (tag) => `${root}/${REPO}/tar.gz/refs/tags/${tag}`,
   };
 }
 
@@ -154,25 +138,13 @@ async function download(deps: LauncherDeps, tag: string): Promise<void> {
   const temp = join(deps.home, "tmp", `${tag}-${process.pid}-${randomBytes(4).toString("hex")}`);
   try {
     await mkdir(join(temp, "x"), { recursive: true });
-    const fetchAsset = async (url: string) => {
-      const response = await deps.fetch(url, {
-        headers: { "User-Agent": "tripezgo-launcher" },
-        signal: AbortSignal.timeout(deps.downloadTimeoutMs ?? 20_000),
-      });
-      if (!response.ok) throw new Error(`HTTP ${response.status} for ${url}`);
-      return response;
-    };
-    const bytes = new Uint8Array(await (await fetchAsset(deps.sources?.tarball(tag) ?? tarballUrl(tag))).arrayBuffer());
-    const signature = await (await fetchAsset(deps.sources?.signature(tag) ?? signatureUrl(tag))).text();
-    // Nothing is extracted, let alone run, until the maintainer's key has signed exactly these bytes.
-    try {
-      verifyMinisign(bytes, signature, deps.publicKey ?? RELEASE_PUBLIC_KEY);
-    } catch (error) {
-      if (error instanceof SignatureError) throw new Error(`signature check failed: ${error.message}`);
-      throw error;
-    }
+    const response = await deps.fetch(deps.sources?.tarball(tag) ?? tarballUrl(tag), {
+      headers: { "User-Agent": "tripezgo-launcher" },
+      signal: AbortSignal.timeout(deps.downloadTimeoutMs ?? 20_000),
+    });
+    if (!response.ok) throw new Error(`HTTP ${response.status}`);
     const archive = join(temp, "release.tar.gz");
-    await writeFile(archive, bytes);
+    await writeFile(archive, new Uint8Array(await response.arrayBuffer()));
     await (deps.extract ?? systemTar)(archive, join(temp, "x"));
 
     const tops = await readdir(join(temp, "x"));

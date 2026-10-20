@@ -5,7 +5,10 @@ import { fileURLToPath } from "node:url";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { FakeApp, json, type RecordedRequest } from "./fakeApp.js";
+import { FakeApp, json, privateLanIPv4, type RecordedRequest } from "./fakeApp.js";
+
+// The CLI refuses loopback, so the fake app listens on this machine's private LAN address (no such address: skipped).
+const LAN = privateLanIPv4();
 
 const CLI = resolve(dirname(fileURLToPath(import.meta.url)), "../dist/cli.js");
 const TOKEN = "e2e-token";
@@ -45,7 +48,7 @@ function fakeMcp(req: RecordedRequest) {
   }
 }
 
-describe("the built CLI under the official MCP SDK client (what Claude Desktop does)", () => {
+describe.skipIf(!LAN)("the built CLI under the official MCP SDK client (what Claude Desktop does)", () => {
   let app: FakeApp;
   let client: Client;
   let dir: string;
@@ -53,7 +56,7 @@ describe("the built CLI under the official MCP SDK client (what Claude Desktop d
   beforeEach(async () => {
     app = new FakeApp();
     app.handler = fakeMcp;
-    const baseUrl = await app.start();
+    const baseUrl = await app.start(LAN);
     dir = await mkdtemp(join(tmpdir(), "tripezgo-mcp-e2e-"));
     client = new Client({ name: "e2e", version: "0.0.0" });
     await client.connect(

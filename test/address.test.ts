@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { ConfigError, assertPrivateAddress } from "../src/config.js";
+import { ConfigError, assertPrivateAddress, parseConfig } from "../src/config.js";
 import type { PlanningGuide } from "../src/guide.js";
 import { SessionBridge } from "../src/session.js";
 import { FakeApp } from "./fakeApp.js";
@@ -60,6 +60,20 @@ describe("assertPrivateAddress: connect takes only a literal private IPv4", () =
     expect(() => assertPrivateAddress("example.com:8765")).toThrow(/literal IPv4.*10\..*172\.16.*192\.168.*169\.254.*100\.64/s);
     expect(() => assertPrivateAddress("example.com:8765")).toThrow(/hostname/i);
   });
+});
+
+describe("--url and TRIPEZGO_URL follow the same rule", () => {
+  it("accepts a private or Tailscale address from the flag and from the variable", () => {
+    expect(parseConfig(["--url", "192.168.1.5:8765", "--token", "t"], {})!.baseUrl).toBe("http://192.168.1.5:8765");
+    expect(parseConfig([], { TRIPEZGO_URL: "http://100.100.1.1:8765/mcp", TRIPEZGO_TOKEN: "t" })!.baseUrl).toBe("http://100.100.1.1:8765");
+  });
+
+  for (const address of ["example.com:8765", "8.8.8.8:8765", "127.0.0.1:8765", "localhost:8765", "[fd00::1]:8765", "172.32.0.1:8765"]) {
+    it(`refuses ${address} with the same explanation, from the flag and from the variable`, () => {
+      expect(() => parseConfig(["--url", address, "--token", "t"], {})).toThrow(/literal IPv4 address on a private network/);
+      expect(() => parseConfig([], { TRIPEZGO_URL: address, TRIPEZGO_TOKEN: "t" })).toThrow(ConfigError);
+    });
+  }
 });
 
 const GUIDE: PlanningGuide = { topics: [], full: () => "", topic: () => undefined };

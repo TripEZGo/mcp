@@ -66,11 +66,6 @@ folders from that version. Meanwhile a background process checks this repository
 GitHub changes nothing. The two newest versions are kept; the background log is `~/.tripezgo/update.log`. Set
 `TRIPEZGO_NO_UPDATE=1` in the server's environment to skip the check.
 
-Releases are **signed**. The launcher downloads the release's tarball and its `.minisig` signature
-(release assets `tripezgo-mcp-<tag>.tar.gz` and `.tar.gz.minisig`) and verifies them against the Ed25519 public
-key built into `launcher.mjs` before it extracts anything. If the signature is missing or doesn't match, it keeps
-the version it has and writes why to `update.log`.
-
 ## Tools
 
 Before connecting, the server lists the app's tools from a snapshot built into each release
@@ -103,7 +98,7 @@ TripEZGo builds from before this change copy a command with the address and toke
 TRIPEZGO_URL=http://IP:PORT TRIPEZGO_TOKEN=TOKEN npx -y github:TripEZGo/mcp
 ```
 
-With `--url` and `TRIPEZGO_TOKEN` (or `TRIPEZGO_URL` / `TRIPEZGO_TOKEN`) the bridge forwards every JSON-RPC line to
+The address must be a literal private-network IPv4 (same rule as `connect`). With `--url` and `TRIPEZGO_TOKEN` (or `TRIPEZGO_URL` / `TRIPEZGO_TOKEN`) the bridge forwards every JSON-RPC line to
 that address unchanged and adds `add_attachment_from_path`, as in 0.1. `--token=TOKEN` still works but is
 **deprecated** — a command-line argument is visible in the process list — and logs a warning; use `TRIPEZGO_TOKEN`.
 
@@ -133,20 +128,8 @@ single, dependency-free bundles. Rebuild and commit `dist/` with every source ch
 `snapshot/app-tools.json` is the app's `tools/list` result (`{"tools":[…]}`) for the newest app release; update
 it whenever the app's tools change, before tagging.
 
-Releasing: bump `version` in `package.json`, `npm test`, commit, tag `vX.Y.Z`, then build and sign the release
-tarball and attach both files to a GitHub release for that tag. Installed launchers pick it up on their next
-start, and only if the signature verifies:
-
-```sh
-git archive --format=tar.gz --prefix=mcp-X.Y.Z/ -o tripezgo-mcp-vX.Y.Z.tar.gz vX.Y.Z
-TRIPEZGO_RELEASE_KEY=/path/to/bridge-release-ed25519.key node scripts/sign-release.mjs tripezgo-mcp-vX.Y.Z.tar.gz
-# → tripezgo-mcp-vX.Y.Z.tar.gz.minisig ; upload both as release assets named exactly so
-```
-
-`TRIPEZGO_RELEASE_KEY` is the path of the Ed25519 private key (PKCS#8 PEM, mode 600; never commit it). The
-signature follows the minisign format (`ED`, BLAKE2b-512 prehash). The public key lives in `RELEASE_PUBLIC_KEY` in `src/launcherCore.ts`; a new key is made with
-`node scripts/gen-release-key.mjs <file>` (it refuses to overwrite) and needs a new public key in the launcher
-— which installed launchers only get by reinstalling, so keep the key.
+Releasing: bump `version` in `package.json`, `npm test`, commit, tag `vX.Y.Z` and push the tag. Installed
+launchers pick it up on their next start.
 
 ---
 

@@ -66,45 +66,10 @@ function compareTags(a, b) {
   return x[0] - y[0] || x[1] - y[1] || x[2] - y[2];
 }
 
-// src/signature.ts
-import { createHash, createPublicKey, verify } from "node:crypto";
-var SPKI_PREFIX = Buffer.from("302a300506032b6570032100", "hex");
-var TRUSTED_COMMENT = "trusted comment: ";
-var SignatureError = class extends Error {
-};
-function parsePublicKey(base64) {
-  const raw = Buffer.from(base64.trim(), "base64");
-  if (raw.length !== 42 || raw.toString("latin1", 0, 2) !== "Ed") throw new SignatureError("not a minisign public key");
-  return { keyId: raw.subarray(2, 10), key: raw.subarray(10) };
-}
-function verifyMinisign(message, signatureFile, publicKey) {
-  const pub = parsePublicKey(publicKey);
-  const lines = signatureFile.split(/\r?\n/);
-  if (lines.length < 4 || !lines[0].startsWith("untrusted comment:") || !lines[2].startsWith(TRUSTED_COMMENT)) {
-    throw new SignatureError("the signature file is malformed");
-  }
-  const sig = Buffer.from(lines[1].trim(), "base64");
-  const globalSig = Buffer.from(lines[3].trim(), "base64");
-  if (sig.length !== 74 || globalSig.length !== 64) throw new SignatureError("the signature file is malformed");
-  const algorithm = sig.toString("latin1", 0, 2);
-  if (algorithm !== "Ed" && algorithm !== "ED") throw new SignatureError("unknown signature algorithm");
-  if (!sig.subarray(2, 10).equals(pub.keyId)) throw new SignatureError("signed with a different key");
-  const key = createPublicKey({ key: Buffer.concat([SPKI_PREFIX, pub.key]), format: "der", type: "spki" });
-  const signed = algorithm === "ED" ? createHash("blake2b512").update(message).digest() : Buffer.from(message);
-  if (!verify(null, signed, key, sig.subarray(10))) throw new SignatureError("the signature does not match the file");
-  const trusted = Buffer.from(lines[2].slice(TRUSTED_COMMENT.length), "utf8");
-  if (!verify(null, Buffer.concat([sig.subarray(10), trusted]), key, globalSig)) {
-    throw new SignatureError("the trusted comment was altered");
-  }
-}
-
 // src/launcherCore.ts
 var REPO = "TripEZGo/mcp";
 var TAGS_URL = `https://api.github.com/repos/${REPO}/tags?per_page=100`;
-var tarballName = (tag) => `tripezgo-mcp-${tag}.tar.gz`;
-var tarballUrl = (tag) => `https://github.com/${REPO}/releases/download/${tag}/${tarballName(tag)}`;
-var signatureUrl = (tag) => `${tarballUrl(tag)}.minisig`;
-var RELEASE_PUBLIC_KEY = "RWQOXh+Dq2IvfnB0D/U1BP3InZrPeHJ5BR8j6p6hllSgROq2+meR7aAn";
+var tarballUrl = (tag) => `https://codeload.github.com/${REPO}/tar.gz/refs/tags/${tag}`;
 var MIN_TAG = "v0.2.0";
 var ENTRY = join2("dist", "cli.js");
 var KEEP_VERSIONS = 2;
@@ -112,8 +77,7 @@ function sourcesAt(base) {
   const root = base.replace(/\/+$/, "");
   return {
     tags: `${root}/repos/${REPO}/tags?per_page=100`,
-    tarball: (tag) => `${root}/${REPO}/releases/download/${tag}/${tarballName(tag)}`,
-    signature: (tag) => `${root}/${REPO}/releases/download/${tag}/${tarballName(tag)}.minisig`
+    tarball: (tag) => `${root}/${REPO}/tar.gz/refs/tags/${tag}`
   };
 }
 async function prepareVersion(deps) {
@@ -175,24 +139,13 @@ async function download(deps, tag) {
   const temp = join2(deps.home, "tmp", `${tag}-${process.pid}-${randomBytes2(4).toString("hex")}`);
   try {
     await mkdir2(join2(temp, "x"), { recursive: true });
-    const fetchAsset = async (url) => {
-      const response = await deps.fetch(url, {
-        headers: { "User-Agent": "tripezgo-launcher" },
-        signal: AbortSignal.timeout(deps.downloadTimeoutMs ?? 2e4)
-      });
-      if (!response.ok) throw new Error(`HTTP ${response.status} for ${url}`);
-      return response;
-    };
-    const bytes = new Uint8Array(await (await fetchAsset(deps.sources?.tarball(tag) ?? tarballUrl(tag))).arrayBuffer());
-    const signature = await (await fetchAsset(deps.sources?.signature(tag) ?? signatureUrl(tag))).text();
-    try {
-      verifyMinisign(bytes, signature, deps.publicKey ?? RELEASE_PUBLIC_KEY);
-    } catch (error) {
-      if (error instanceof SignatureError) throw new Error(`signature check failed: ${error.message}`);
-      throw error;
-    }
+    const response = await deps.fetch(deps.sources?.tarball(tag) ?? tarballUrl(tag), {
+      headers: { "User-Agent": "tripezgo-launcher" },
+      signal: AbortSignal.timeout(deps.downloadTimeoutMs ?? 2e4)
+    });
+    if (!response.ok) throw new Error(`HTTP ${response.status}`);
     const archive = join2(temp, "release.tar.gz");
-    await writeFile2(archive, bytes);
+    await writeFile2(archive, new Uint8Array(await response.arrayBuffer()));
     await (deps.extract ?? systemTar)(archive, join2(temp, "x"));
     const tops = await readdir(join2(temp, "x"));
     if (tops.length !== 1) throw new Error("unexpected tarball layout");

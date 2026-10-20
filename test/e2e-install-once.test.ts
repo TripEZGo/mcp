@@ -11,8 +11,6 @@ import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { stableNodePath } from "../src/install.js";
-import { RELEASE_PUBLIC_KEY } from "../src/launcherCore.js";
-import { testKey } from "./signing.js";
 import { FakeApp, json, privateLanIPv4, type RecordedRequest } from "./fakeApp.js";
 
 const LAN = privateLanIPv4();
@@ -84,7 +82,8 @@ describe("the bundle with no arguments, under the official MCP SDK client", () =
   afterEach(async () => {
     await client?.close();
     await app.stop();
-    await rm(dir, { recursive: true, force: true });
+    // The first launcher's detached updater may still be finishing its cleanup inside `dir`: retry ENOTEMPTY.
+    await rm(dir, { recursive: true, force: true, maxRetries: 10, retryDelay: 200 });
   });
 
   it.skipIf(!LAN)("starts unconnected, lists the snapshot, refuses app tools until connect, then forwards them", async () => {
@@ -155,15 +154,10 @@ describe("the bundle with no arguments, under the official MCP SDK client", () =
   it("starts at once on the cached version when a newer tag exists, and has the newer one cached for the next start", async () => {
     const home = join(dir, ".tripezgo");
     await mkdir(home, { recursive: true });
-    // The built launcher with a throwaway public key swapped in for the hard-coded one, so the release below
-    // can be signed without the real private key.
-    const key = testKey();
-    const built = await readFile(join(REPO, "dist", "launcher.mjs"), "utf8");
-    expect(built).toContain(RELEASE_PUBLIC_KEY);
-    await writeFile(join(home, "launcher.mjs"), built.replace(RELEASE_PUBLIC_KEY, key.publicKey));
+    await cp(join(REPO, "dist", "launcher.mjs"), join(home, "launcher.mjs"));
     await release(join(home, "versions", "v0.2.0"));
 
-    // The newer release, as the signed release asset, reporting itself as 9.9.9.
+    // The newer release, as codeload serves it, reporting itself as 9.9.9.
     const src = join(dir, "release-src");
     await release(join(src, "mcp-9.9.9"));
     await writeFile(join(src, "mcp-9.9.9", "package.json"), '{"name":"tripezgo-mcp","version":"9.9.9"}');
@@ -176,10 +170,7 @@ describe("the bundle with no arguments, under the official MCP SDK client", () =
       if (req.url?.startsWith("/repos/TripEZGo/mcp/tags")) {
         res.writeHead(200, { "Content-Type": "application/json" });
         res.end(JSON.stringify([{ name: "v0.2.0" }, { name: "v9.9.9" }]));
-      } else if (req.url === "/TripEZGo/mcp/releases/download/v9.9.9/tripezgo-mcp-v9.9.9.tar.gz.minisig") {
-        res.writeHead(200);
-        res.end(key.sign(archive));
-      } else if (req.url === "/TripEZGo/mcp/releases/download/v9.9.9/tripezgo-mcp-v9.9.9.tar.gz") {
+      } else if (req.url === "/TripEZGo/mcp/tar.gz/refs/tags/v9.9.9") {
         setTimeout(() => {
           tarballServedAt = Date.now();
           res.writeHead(200);
@@ -210,8 +201,12 @@ describe("the bundle with no arguments, under the official MCP SDK client", () =
       }
       expect(existsSync(join(home, "versions", "v9.9.9", "dist", "cli.js"))).toBe(true);
 
+      // The second start only has to run the new version. Its own detached updater would still be writing into
+      // `home` while the teardown deletes it (ENOTEMPTY), so it doesn't get one.
       client = new Client({ name: "claude-code", version: "9.9.9" });
-      await client.connect(new StdioClientTransport({ command: process.execPath, args: [join(home, "launcher.mjs")], env, stderr: "ignore" }));
+      await client.connect(
+        new StdioClientTransport({ command: process.execPath, args: [join(home, "launcher.mjs")], env: { ...env, TRIPEZGO_NO_UPDATE: "1" }, stderr: "ignore" }),
+      );
       expect(client.getServerVersion()).toEqual({ name: "TripEZGo", version: "9.9.9" });
     } finally {
       github.close();

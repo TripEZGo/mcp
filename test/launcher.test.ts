@@ -4,8 +4,7 @@ import { mkdir, mkdtemp, readFile, readdir, rm, writeFile } from "node:fs/promis
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { type LauncherDeps, TAGS_URL, prepareVersion, signatureUrl, sourcesAt, tarballUrl, updateCache } from "../src/launcherCore.js";
-import { type TestKey, testKey } from "./signing.js";
+import { type LauncherDeps, TAGS_URL, prepareVersion, sourcesAt, tarballUrl, updateCache } from "../src/launcherCore.js";
 
 interface Fixture {
   root: string;
@@ -14,9 +13,6 @@ interface Fixture {
   logs: string[];
   tags: unknown;
   tarballs: Map<string, Buffer>;
-  /** A signature file to serve for a tag instead of the valid one. */
-  signatures: Map<string, string>;
-  key: TestKey;
   deps: LauncherDeps;
 }
 
@@ -58,13 +54,10 @@ async function fixture(): Promise<Fixture> {
     logs: [],
     tags: [],
     tarballs: new Map(),
-    signatures: new Map(),
-    key: testKey(),
     deps: undefined as unknown as LauncherDeps,
   };
   f.deps = {
     home,
-    publicKey: f.key.publicKey,
     log: (m) => f.logs.push(m),
     fetch: (async (input: string | URL | Request, init?: RequestInit) => {
       const url = String(input);
@@ -73,12 +66,6 @@ async function fixture(): Promise<Fixture> {
         if (f.tags instanceof Error) throw f.tags;
         if (f.tags instanceof Response) return f.tags;
         return new Response(JSON.stringify(f.tags), { status: 200 });
-      }
-      const signed = [...f.tarballs].find(([tag]) => url === signatureUrl(tag));
-      if (signed) {
-        // Signed as the release script does, unless a test stages another signature.
-        const text = f.signatures.get(signed[0]) ?? f.key.sign(signed[1]);
-        return new Response(text, { status: 200 });
       }
       const body = [...f.tarballs].find(([tag]) => url === tarballUrl(tag))?.[1];
       if (!body) return new Response("nope", { status: 404 });
@@ -144,7 +131,7 @@ describe("prepareVersion: what runs now", () => {
     const picked = await prepareVersion(f.deps);
 
     expect(picked).toEqual({ tag: "v0.10.0", dir: join(f.home, "versions", "v0.10.0") });
-    expect(f.fetched).toEqual([TAGS_URL, tarballUrl("v0.10.0"), signatureUrl("v0.10.0")]);
+    expect(f.fetched).toEqual([TAGS_URL, tarballUrl("v0.10.0")]);
     expect(background).toBe(0);
   });
 
@@ -209,7 +196,7 @@ describe("updateCache: the background update", () => {
     expect(await updateCache(f.deps)).toBe("v0.10.0");
 
     expect(await readFile(join(f.home, "versions", "v0.10.0", "dist", "cli.js"), "utf8")).toBe("// cli v0.10.0");
-    expect(f.fetched).toEqual([TAGS_URL, tarballUrl("v0.10.0"), signatureUrl("v0.10.0")]);
+    expect(f.fetched).toEqual([TAGS_URL, tarballUrl("v0.10.0")]);
     expect(await tmpLeft()).toEqual([]);
   });
 
@@ -219,7 +206,7 @@ describe("updateCache: the background update", () => {
     f.tags = new TypeError("fetch failed");
     await updateCache(f.deps);
     expect(f.fetched).toEqual(["http://127.0.0.1:1/repos/TripEZGo/mcp/tags?per_page=100"]);
-    expect(sources.tarball("v1.2.3")).toBe("http://127.0.0.1:1/TripEZGo/mcp/releases/download/v1.2.3/tripezgo-mcp-v1.2.3.tar.gz");
+    expect(sources.tarball("v1.2.3")).toBe("http://127.0.0.1:1/TripEZGo/mcp/tar.gz/refs/tags/v1.2.3");
   });
 
   it("doesn't download a release older than one already cached (a local install ahead of the newest tag)", async () => {
@@ -265,42 +252,6 @@ describe("updateCache: the background update", () => {
     await updateCache(f.deps);
     expect(await cachedNow()).toEqual(["v0.2.0"]);
     expect(await tmpLeft()).toEqual([]);
-  });
-
-  it("keeps the cached version and says why when the signature is from another key", async () => {
-    await cache(f.home, "v0.2.0");
-    f.tags = tagList("v0.4.0");
-    const archive = await tarball(f.root, "v0.4.0", goodFiles("v0.4.0"));
-    f.tarballs.set("v0.4.0", archive);
-    f.signatures.set("v0.4.0", testKey().sign(archive));
-
-    await updateCache(f.deps);
-    expect(await cachedNow()).toEqual(["v0.2.0"]);
-    expect(f.logs.join("\n")).toMatch(/signature check failed: signed with a different key/);
-    expect(await tmpLeft()).toEqual([]);
-  });
-
-  it("keeps the cached version when the tarball was altered after signing", async () => {
-    await cache(f.home, "v0.2.0");
-    f.tags = tagList("v0.4.0");
-    const archive = await tarball(f.root, "v0.4.0", goodFiles("v0.4.0"));
-    f.signatures.set("v0.4.0", f.key.sign(archive));
-    f.tarballs.set("v0.4.0", await tarball(f.root, "v0.4.0", { ...goodFiles("v0.4.0"), "dist/cli.js": "// evil" }));
-
-    await updateCache(f.deps);
-    expect(await cachedNow()).toEqual(["v0.2.0"]);
-    expect(f.logs.join("\n")).toMatch(/signature check failed: the signature does not match the file/);
-  });
-
-  it("keeps the cached version when the release has no signature", async () => {
-    await cache(f.home, "v0.2.0");
-    f.tags = tagList("v0.4.0");
-    f.tarballs.set("v0.4.0", await tarball(f.root, "v0.4.0", goodFiles("v0.4.0")));
-    f.deps.fetch = (async (input: string | URL | Request) =>
-      String(input) === signatureUrl("v0.4.0") ? new Response("nope", { status: 404 }) : Response.json(tagList("v0.4.0"))) as typeof fetch;
-
-    await updateCache(f.deps);
-    expect(await cachedNow()).toEqual(["v0.2.0"]);
   });
 
   it("rejects a tarball without the bundled bridge", async () => {
