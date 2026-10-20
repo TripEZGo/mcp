@@ -14,7 +14,7 @@ describe("Bridge forwarding", () => {
   let logs: string[];
 
   beforeEach(async () => {
-    app = new FakeApp();
+    app = new FakeApp(TOKEN);
     const baseUrl = await app.start();
     logs = [];
     bridge = new Bridge({ baseUrl, token: TOKEN, log: (m) => logs.push(m) });

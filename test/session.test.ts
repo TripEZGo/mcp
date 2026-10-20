@@ -188,7 +188,7 @@ describe("SessionBridge connect", () => {
   let bridge: SessionBridge;
 
   beforeEach(async () => {
-    app = new FakeApp();
+    app = new FakeApp(TOKEN);
     app.handler = appHandler();
     baseUrl = await app.start();
     bridge = new SessionBridge({ appTools: SNAPSHOT, guide: GUIDE, version: "0.2.0", allowLoopback: true });
@@ -253,11 +253,11 @@ describe("SessionBridge connect", () => {
     expect(await bridge.handle(call("list_trips"))).toEqual([body]);
   });
 
-  it("answers a wrong token with a tool error asking for a new sentence, and stays unconnected", async () => {
+  it("answers a wrong key with a tool error asking for a fresh sentence, and stays unconnected", async () => {
     const reply = parse(await bridge.handle(call("connect", { address: baseUrl, token: "wrong" })));
 
     expect(reply.result.isError).toBe(true);
-    expect(reply.result.content[0].text).toMatch(/401/);
+    expect(reply.result.content[0].text).toMatch(/key is wrong/);
     expect(reply.result.content[0].text).toMatch(/connect sentence/);
     expect(parse(await bridge.handle(call("list_trips"))).result.content[0].text).toMatch(/Not connected/);
   });
@@ -323,13 +323,13 @@ describe("SessionBridge connect", () => {
 
     // Same port again: the phone came back.
     const port = Number(new URL(baseUrl).port);
-    await new Promise<void>((resolve) => (app as unknown as { server: import("node:http").Server }).server.listen(port, "127.0.0.1", resolve));
+    await new Promise<void>((resolve) => (app as unknown as { server: import("node:https").Server }).server.listen(port, "127.0.0.1", resolve));
     expect(parse(await bridge.handle(call("list_trips"))).result.content[0].text).toBe("ran list_trips");
   });
 
   it("replaces the old connection when connect is called again with a new address and token", async () => {
     await bridge.handle(call("connect", { address: baseUrl, token: TOKEN }));
-    const second = new FakeApp();
+    const second = new FakeApp("second-token");
     second.handler = appHandler({ token: "second-token" });
     const secondUrl = await second.start();
     try {

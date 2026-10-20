@@ -1,3 +1,4 @@
+import { phoneFetch } from "./phoneTransport.js";
 import { readFile, realpath, stat } from "node:fs/promises";
 import { homedir } from "node:os";
 import { basename, join, resolve, sep } from "node:path";
@@ -111,7 +112,7 @@ export async function addAttachmentFromPath(args: unknown, options: UploadOption
   if (typeof input.eventId === "string" && input.eventId !== "") query.set("eventId", input.eventId);
   query.set("name", name);
 
-  const doFetch = options.fetch ?? fetch;
+  const doFetch = options.fetch ?? phoneFetch;
   let response: Response;
   try {
     response = await doFetch(`${options.baseUrl}/upload?${query.toString()}`, {

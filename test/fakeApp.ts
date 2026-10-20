@@ -1,7 +1,10 @@
-import { createServer, type IncomingHttpHeaders, type Server } from "node:http";
+import { createServer as createPlainServer, type IncomingHttpHeaders } from "node:http";
+import { createServer, type Server } from "node:https";
 import type { AddressInfo } from "node:net";
+import type { TLSSocket } from "node:tls";
 import { networkInterfaces } from "node:os";
 import { assertPrivateAddress } from "../src/config.js";
+import { PSK_CIPHER, PSK_IDENTITY, derivePsk } from "../src/phoneTransport.js";
 
 export interface RecordedRequest {
   method: string;
@@ -9,6 +12,8 @@ export interface RecordedRequest {
   query: URLSearchParams;
   headers: IncomingHttpHeaders;
   body: Buffer;
+  /** What the TLS handshake negotiated. */
+  tls: { protocol: string | null; cipher: string };
 }
 
 export interface FakeReply {
@@ -19,14 +24,26 @@ export interface FakeReply {
 
 export type FakeHandler = (request: RecordedRequest) => FakeReply;
 
-/** A stand-in for the iPhone app's HTTP listener: records every request and answers with `handler`. */
+/**
+ * A stand-in for the iPhone app's listener: HTTP over TLS 1.2 + PSK (derived from `key`, like the app), records every
+ * request and answers with `handler`.
+ */
 export class FakeApp {
   readonly requests: RecordedRequest[] = [];
   handler: FakeHandler = () => ({ status: 500, body: "no handler" });
   private server: Server | undefined;
 
+  constructor(readonly key: string) {}
+
   async start(host = "127.0.0.1"): Promise<string> {
-    this.server = createServer((req, res) => {
+    this.server = createServer(
+      {
+        minVersion: "TLSv1.2",
+        maxVersion: "TLSv1.2",
+        ciphers: PSK_CIPHER,
+        pskCallback: (_socket, identity) => (identity === PSK_IDENTITY ? derivePsk(this.key) : null),
+      },
+      (req, res) => {
       const chunks: Buffer[] = [];
       req.on("data", (chunk: Buffer) => chunks.push(chunk));
       req.on("end", () => {
@@ -37,13 +54,15 @@ export class FakeApp {
           query: url.searchParams,
           headers: req.headers,
           body: Buffer.concat(chunks),
+          tls: { protocol: (req.socket as TLSSocket).getProtocol(), cipher: (req.socket as TLSSocket).getCipher().name },
         };
         this.requests.push(recorded);
         const reply = this.handler(recorded);
         res.writeHead(reply.status, reply.headers ?? {});
         res.end(reply.body ?? "");
       });
-    });
+      },
+    );
     await new Promise<void>((resolve) => this.server!.listen(0, host, resolve));
     const { port } = this.server.address() as AddressInfo;
     return `http://${host}:${port}`;
@@ -81,7 +100,7 @@ export const json = (status: number, value: unknown, headers: Record<string, str
 
 /** An address nothing listens on. */
 export async function closedPortUrl(): Promise<string> {
-  const server = createServer();
+  const server = createPlainServer();
   await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
   const { port } = server.address() as AddressInfo;
   await new Promise<void>((resolve) => server.close(() => resolve()));

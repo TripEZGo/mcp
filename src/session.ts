@@ -1,3 +1,4 @@
+import { phoneFetch } from "./phoneTransport.js";
 import { ConfigError, assertPrivateAddress, normalizeBaseUrl } from "./config.js";
 import type { PlanningGuide } from "./guide.js";
 import {
@@ -311,7 +312,7 @@ export class SessionBridge {
   }
 
   private post(baseUrl: string, token: string, body: string, extra: Record<string, string>): Promise<Response> {
-    return (this.options.fetch ?? fetch)(`${baseUrl}/mcp`, {
+    return (this.options.fetch ?? phoneFetch)(`${baseUrl}/mcp`, {
       method: "POST",
       headers: {
         "Content-Type": "application/json",

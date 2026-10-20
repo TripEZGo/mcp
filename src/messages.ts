@@ -1,3 +1,5 @@
+import { TlsHandshakeError } from "./phoneTransport.js";
+
 /** Human-readable messages shared by the bridge and the upload tool. */
 
 export type Wording = "command" | "sentence";
@@ -7,6 +9,7 @@ export type Wording = "command" | "sentence";
  * connect sentence.
  */
 export function unreachableMessage(baseUrl: string, cause: unknown, wording: Wording = "command"): string {
+  if (cause instanceof TlsHandshakeError) return tlsHandshakeMessage(baseUrl, cause, wording);
   const detail = cause instanceof Error ? describeCause(cause) : String(cause);
   return (
     `Can't reach the TripEZGo app at ${baseUrl} (${detail}). ` +
@@ -17,6 +20,17 @@ export function unreachableMessage(baseUrl: string, cause: unknown, wording: Wor
         "was reopened), ask the user to copy the latest connect sentence from the iPhone and paste it again, " +
         "then call `connect` with it."
       : "")
+  );
+}
+
+/** The app answered the TCP connection but not the TLS handshake. There is no plaintext fallback. */
+export function tlsHandshakeMessage(baseUrl: string, cause: Error, wording: Wording = "command"): string {
+  return (
+    `Couldn't set up the encrypted connection to the TripEZGo app at ${baseUrl} (${describeCause(cause)}). ` +
+    "Either TripEZGo on the iPhone is too old for this bridge (the bridge only talks TLS with a key-derived " +
+    "secret, never plain HTTP), or the key is wrong. Ask the user to update TripEZGo from the App Store, reopen the " +
+    '"Connect computer AI" page (連接電腦 AI), and ' +
+    (wording === "sentence" ? "paste the fresh connect sentence it shows, then call `connect` again." : "copy the new command.")
   );
 }
 
@@ -73,6 +87,7 @@ export function unsupportedToolMessage(tool: string, appVersion: string | undefi
 }
 
 function describeCause(error: Error): string {
+  if (error instanceof TlsHandshakeError) return (error.cause as Error | undefined)?.message ?? error.message;
   if (error.name === "TimeoutError" || error.name === "AbortError") return "timed out";
   const cause = (error as Error & { cause?: unknown }).cause;
   if (cause && typeof cause === "object") {

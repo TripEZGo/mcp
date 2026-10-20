@@ -9,7 +9,7 @@ describe("runStdio", () => {
   let baseUrl: string;
 
   beforeEach(async () => {
-    app = new FakeApp();
+    app = new FakeApp("t");
     baseUrl = await app.start();
   });
 

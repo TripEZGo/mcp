@@ -87,7 +87,7 @@ App Store.
 - Without the key, nobody else on the same Wi-Fi (café, hotel) can talk to the app.
 - The AI can do no more than you can in the app: read-only and shared-trip limits and your trip limit still
   apply. Its changes are not confirmed one by one on the phone; the page lists them as they happen.
-- Traffic stays on your local network and is plain HTTP — use a network you trust.
+- Traffic stays on your local network and is encrypted: TLS 1.2 with a pre-shared key derived from the connect key (HMAC-SHA256 of the key, no certificates). The bridge never falls back to plain HTTP, so it needs a TripEZGo version that speaks TLS; with an older app, or a wrong key, `connect` fails and asks to update the app and paste a fresh sentence. Node 18+ supports this (`tls` `pskCallback`, since v12.16).
 - The key appears in the conversation; it dies with the page.
 
 ## Older app versions

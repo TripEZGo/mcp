@@ -1,3 +1,4 @@
+import { phoneFetch } from "./phoneTransport.js";
 import type { BridgeConfig } from "./config.js";
 import { unauthorizedMessage, unreachableMessage } from "./messages.js";
 import { ErrorCode, type Id, type Json, errorLine, hasCursor, hasId, isJsonRpc, isObject, sseData } from "./protocol.js";
@@ -67,7 +68,7 @@ export class Bridge {
 
     let response: Response;
     try {
-      response = await (this.options.fetch ?? fetch)(`${this.options.baseUrl}/mcp`, {
+      response = await (this.options.fetch ?? phoneFetch)(`${this.options.baseUrl}/mcp`, {
         method: "POST",
         headers,
         body: raw,

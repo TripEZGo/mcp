@@ -15,7 +15,7 @@ describe("add_attachment_from_path", () => {
   let dir: string;
 
   beforeEach(async () => {
-    app = new FakeApp();
+    app = new FakeApp(TOKEN);
     baseUrl = await app.start();
     dir = await mkdtemp(join(tmpdir(), "tripezgo-mcp-test-"));
   });

@@ -54,7 +54,7 @@ describe.skipIf(!LAN)("the built CLI under the official MCP SDK client (what Cla
   let dir: string;
 
   beforeEach(async () => {
-    app = new FakeApp();
+    app = new FakeApp(TOKEN);
     app.handler = fakeMcp;
     const baseUrl = await app.start(LAN);
     dir = await mkdtemp(join(tmpdir(), "tripezgo-mcp-e2e-"));

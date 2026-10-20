@@ -15,7 +15,7 @@ describe("add_attachment_from_path refuses paths that hold secrets", () => {
   let work: string;
 
   beforeEach(async () => {
-    app = new FakeApp();
+    app = new FakeApp(TOKEN);
     app.handler = () => json(200, { attachmentId: "A-1", name: "x", byteCount: 1 });
     baseUrl = await app.start();
     root = await mkdtemp(join(tmpdir(), "tripezgo-paths-"));

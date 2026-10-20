@@ -71,7 +71,7 @@ describe("the bundle with no arguments, under the official MCP SDK client", () =
   let client: Client;
 
   beforeEach(async () => {
-    app = new FakeApp();
+    app = new FakeApp(TOKEN);
     app.handler = fakeMcp;
     // `connect` refuses loopback, so the fake app listens on this machine's private LAN address (when it has one).
     baseUrl = await app.start(LAN ?? "127.0.0.1");

@@ -86,7 +86,7 @@ describe("SessionBridge connect refuses an address outside the private ranges", 
   let bridge: SessionBridge;
 
   beforeEach(async () => {
-    app = new FakeApp();
+    app = new FakeApp("tok");
     baseUrl = await app.start();
     bridge = new SessionBridge({ appTools: [], guide: GUIDE, version: "0.2.0" });
   });

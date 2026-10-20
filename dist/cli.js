@@ -4,10 +4,110 @@
 import { homedir as homedir2 } from "node:os";
 import { join as join6 } from "node:path";
 
+// src/phoneTransport.ts
+import { createHmac } from "node:crypto";
+import { Agent, request } from "node:https";
+var PSK_CIPHER = "PSK-AES128-GCM-SHA256";
+var PSK_IDENTITY = "tripezgo";
+var PSK_CONTEXT = "tripezgo tls psk v1";
+function derivePsk(connectionKey) {
+  return createHmac("sha256", Buffer.from(connectionKey, "utf8")).update(PSK_CONTEXT, "utf8").digest();
+}
+function pskClientOptions(connectionKey) {
+  const psk = derivePsk(connectionKey);
+  return {
+    minVersion: "TLSv1.2",
+    maxVersion: "TLSv1.2",
+    ciphers: PSK_CIPHER,
+    pskCallback: () => ({ psk, identity: PSK_IDENTITY })
+  };
+}
+var TlsHandshakeError = class extends Error {
+  constructor(cause) {
+    super(`TLS handshake failed: ${cause instanceof Error ? cause.message : String(cause)}`, { cause });
+    this.name = "TlsHandshakeError";
+  }
+};
+var agents = /* @__PURE__ */ new Map();
+function agentFor(connectionKey) {
+  let agent = agents.get(connectionKey);
+  if (!agent) {
+    agent = new Agent({
+      keepAlive: true,
+      ...pskClientOptions(connectionKey),
+      // PSK mode has no certificate to check; the shared key is the authentication.
+      checkServerIdentity: () => void 0
+    });
+    agents.set(connectionKey, agent);
+  }
+  return agent;
+}
+var phoneFetch = ((input, init = {}) => {
+  const url = new URL(typeof input === "string" ? input : input instanceof URL ? input.href : input.url);
+  const headers = new Headers(init.headers);
+  const key = /^Bearer (.*)$/.exec(headers.get("authorization") ?? "")?.[1];
+  if (key === void 0) return Promise.reject(new TypeError("phoneFetch needs the connection key as a Bearer token"));
+  const signal = init.signal ?? void 0;
+  const body = init.body === void 0 || init.body === null ? void 0 : typeof init.body === "string" ? init.body : Buffer.from(init.body);
+  return new Promise((resolve3, reject) => {
+    if (signal?.aborted) return reject(signal.reason);
+    let tcpUp = false;
+    let secured = false;
+    const outHeaders = {};
+    headers.forEach((value, name) => outHeaders[name] = value);
+    const req = request(
+      {
+        host: url.hostname,
+        port: url.port || 443,
+        path: `${url.pathname}${url.search}`,
+        method: init.method ?? "GET",
+        headers: outHeaders,
+        agent: agentFor(key),
+        servername: ""
+        // an IP literal; no SNI
+      },
+      (res) => {
+        const chunks = [];
+        res.on("data", (chunk) => chunks.push(chunk));
+        res.on("error", reject);
+        res.on("end", () => {
+          const responseHeaders = new Headers();
+          for (const [name, value] of Object.entries(res.headers)) {
+            if (Array.isArray(value)) value.forEach((v) => responseHeaders.append(name, v));
+            else if (value !== void 0) responseHeaders.set(name, value);
+          }
+          const status = res.statusCode ?? 0;
+          const empty = status === 204 || status === 205 || status === 304;
+          resolve3(new Response(empty ? null : Buffer.concat(chunks), { status, headers: responseHeaders }));
+        });
+      }
+    );
+    req.on("socket", (socket) => {
+      if (!socket.connecting) {
+        tcpUp = true;
+        secured = true;
+        return;
+      }
+      socket.once("connect", () => tcpUp = true);
+      socket.once("secureConnect", () => secured = true);
+    });
+    req.on("error", (error) => {
+      if (signal?.aborted) return reject(signal.reason);
+      reject(tcpUp && !secured ? new TlsHandshakeError(error) : error);
+    });
+    signal?.addEventListener("abort", () => req.destroy(), { once: true });
+    req.end(body);
+  });
+});
+
 // src/messages.ts
 function unreachableMessage(baseUrl, cause, wording = "command") {
+  if (cause instanceof TlsHandshakeError) return tlsHandshakeMessage(baseUrl, cause, wording);
   const detail = cause instanceof Error ? describeCause(cause) : String(cause);
   return `Can't reach the TripEZGo app at ${baseUrl} (${detail}). On the iPhone, keep the "Connect computer AI" page (\u9023\u63A5\u96FB\u8166 AI) open with TripEZGo in the foreground, and make sure the phone and this computer are on the same Wi-Fi.` + (wording === "sentence" ? " If that page now shows a different address or a new connect sentence (the Wi-Fi changed, or the page was reopened), ask the user to copy the latest connect sentence from the iPhone and paste it again, then call `connect` with it." : "");
+}
+function tlsHandshakeMessage(baseUrl, cause, wording = "command") {
+  return `Couldn't set up the encrypted connection to the TripEZGo app at ${baseUrl} (${describeCause(cause)}). Either TripEZGo on the iPhone is too old for this bridge (the bridge only talks TLS with a key-derived secret, never plain HTTP), or the key is wrong. Ask the user to update TripEZGo from the App Store, reopen the "Connect computer AI" page (\u9023\u63A5\u96FB\u8166 AI), and ` + (wording === "sentence" ? "paste the fresh connect sentence it shows, then call `connect` again." : "copy the new command.");
 }
 function unauthorizedMessage() {
   return 'The TripEZGo app rejected the token (HTTP 401). The token only works while the "Connect computer AI" page that made it stays open; if you closed it, open the page again and copy the new command.';
@@ -29,6 +129,7 @@ function unsupportedToolMessage(tool, appVersion) {
   return `The TripEZGo app on the iPhone${appVersion ? ` (version ${appVersion})` : ""} doesn't have ${tool} yet. Ask the user to update TripEZGo from the App Store, reopen the "Connect computer AI" page, and paste the new connect sentence; then call \`connect\` again and retry.`;
 }
 function describeCause(error) {
+  if (error instanceof TlsHandshakeError) return error.cause?.message ?? error.message;
   if (error.name === "TimeoutError" || error.name === "AbortError") return "timed out";
   const cause = error.cause;
   if (cause && typeof cause === "object") {
@@ -66,8 +167,8 @@ function isObject(value) {
 function hasId(message) {
   return "id" in message && message.id !== void 0;
 }
-function hasCursor(request) {
-  return isObject(request.params) && request.params.cursor !== void 0;
+function hasCursor(request2) {
+  return isObject(request2.params) && request2.params.cursor !== void 0;
 }
 function isJsonRpc(body) {
   try {
@@ -214,7 +315,7 @@ async function addAttachmentFromPath(args, options) {
   if (typeof input.tripId === "string" && input.tripId !== "") query.set("tripId", input.tripId);
   if (typeof input.eventId === "string" && input.eventId !== "") query.set("eventId", input.eventId);
   query.set("name", name);
-  const doFetch = options.fetch ?? fetch;
+  const doFetch = options.fetch ?? phoneFetch;
   let response;
   try {
     response = await doFetch(`${options.baseUrl}/upload?${query.toString()}`, {
@@ -345,7 +446,7 @@ var Bridge = class {
     if (this.protocolVersion) headers["MCP-Protocol-Version"] = this.protocolVersion;
     let response;
     try {
-      response = await (this.options.fetch ?? fetch)(`${this.options.baseUrl}/mcp`, {
+      response = await (this.options.fetch ?? phoneFetch)(`${this.options.baseUrl}/mcp`, {
         method: "POST",
         headers,
         body: raw,
@@ -378,7 +479,7 @@ var Bridge = class {
     return bodies.map((body) => this.passBack(body, message));
   }
   /** The app's answer, unchanged unless it is the `tools/list` result or has to be squeezed onto one line. */
-  passBack(body, request) {
+  passBack(body, request2) {
     let parsed;
     try {
       parsed = JSON.parse(body);
@@ -386,11 +487,11 @@ var Bridge = class {
       return body.replace(/\r?\n/g, " ");
     }
     if (isObject(parsed) && isObject(parsed.result)) {
-      if (request?.method === "initialize") {
+      if (request2?.method === "initialize") {
         if (typeof parsed.result.protocolVersion === "string") this.protocolVersion = parsed.result.protocolVersion;
         this.uploadLimitBytes = uploadLimitFrom(parsed.result) ?? DEFAULT_UPLOAD_LIMIT_BYTES;
       }
-      if (request?.method === "tools/list" && !hasCursor(request) && Array.isArray(parsed.result.tools)) {
+      if (request2?.method === "tools/list" && !hasCursor(request2) && Array.isArray(parsed.result.tools)) {
         if (!parsed.result.tools.some((tool) => isObject(tool) && tool.name === LOCAL_TOOL_NAME)) {
           parsed.result.tools.push(localTool(this.uploadLimitBytes));
         }
@@ -1097,7 +1198,7 @@ ${instructions}` : "")
     if (this.connection === connection) this.connection = void 0;
   }
   post(baseUrl, token, body, extra) {
-    return (this.options.fetch ?? fetch)(`${baseUrl}/mcp`, {
+    return (this.options.fetch ?? phoneFetch)(`${baseUrl}/mcp`, {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
