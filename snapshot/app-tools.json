@@ -97,7 +97,7 @@
       "name": "create_trip"
     },
     {
-      "description": "Change a trip's name, schedule, main place or time zone. Pass only what changes; fields equal to what the trip already has are left alone. Leave tripId out for the default trip. Schedule: startDate + endDate (YYYY-MM-DD), or dayCount (1-300) for undecided dates. Events are kept by day number, not by date: moving the start from Jul 1 to Jul 3 moves day 1's events to Jul 3. Shortening a trip deletes nothing; events on the days beyond the new end are hidden and come back if the trip is made longer again. The result's hiddenEventCount is how many events this change hid and reappearedEventCount how many hidden ones it brought back (0 when the day count did not change). When hiddenEventCount is above 0, always tell the user: those events are not deleted, the phone no longer shows them in the trip or the overview, they are listed under Settings > Itinerary > Hidden days, and making the trip longer again brings them back; list_events marks them hiddenBeyondTripEnd. Main place: placeId from search_trip_place, placeName to take the first match, or clearPlace: true. Time zone: mode followPlace (the main place's zone; needs a place with one time zone), followPhone (always the phone's current zone) or custom with an IANA timeZone such as Asia/Tokyo. Changing the time zone moves no event. Only the trip's owner may change these: a trip shared with the user by someone else, and the demo trip, are refused.",
+      "description": "Change a trip's name, schedule, main place or time zone. Pass only what changes; fields equal to what the trip already has are left alone. Leave tripId out for the default trip. Schedule: startDate + endDate (YYYY-MM-DD), or dayCount (1-300) for undecided dates. Events are kept by day number, not by date: moving the start from Jul 1 to Jul 3 moves day 1's events to Jul 3. Shortening a trip deletes nothing; events on the days beyond the new end are hidden and come back if the trip is made longer again. The result's hiddenEventCount is how many events this change hid and reappearedEventCount how many hidden ones it brought back (0 when the day count did not change). When hiddenEventCount is above 0, always tell the user: those events are not deleted, the phone no longer shows them in the trip or the overview, they are listed under Settings > Itinerary > Hidden days, and making the trip longer again brings them back; list_events marks them hiddenBeyondTripEnd. Main place: placeId from search_trip_place, placeName to take the first match, or clearPlace: true. Time zone: mode followPlace (the main place's zone; needs a place with one time zone), followPhone (always the phone's current zone) or custom with an IANA timeZone such as Asia/Tokyo. Changing the time zone moves no event. Only the trip's owner may change these: a trip shared with the user by someone else is refused.",
       "inputSchema": {
         "properties": {
           "clearPlace": {
@@ -1352,6 +1352,295 @@
         "type": "object"
       },
       "name": "delete_note"
+    },
+    {
+      "description": "List a trip's inspirations, newest first: things the user saved from other apps (a link, a piece of text, photos or files) that are not yet decided. Each shows its title, link and source, categories (image / place / text / link; one can be several, and link means it has a web address), event type, place, whether the user has read it, whether it is linked (it was turned into something in the trip that still exists and the user can see, listed under destinations), and whether it is private. Linked is worked out, not set: once everything it was turned into is deleted it is unlinked again. Filter like the app's filter bar: status (default all), categories (any of them) and types. Leave tripId out for the default trip.",
+      "inputSchema": {
+        "properties": {
+          "categories": {
+            "description": "Only inspirations in any of these categories.",
+            "items": {
+              "enum": [
+                "image",
+                "place",
+                "text",
+                "link"
+              ],
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "status": {
+            "description": "unlinked: not turned into anything that still exists; linked: it is; all: both. Default all.",
+            "enum": [
+              "unlinked",
+              "linked",
+              "all"
+            ],
+            "type": "string"
+          },
+          "tripId": {
+            "description": "Trip id from list_trips. Optional.",
+            "type": "string"
+          },
+          "types": {
+            "description": "Only inspirations of these event types (one with no type chosen counts as other).",
+            "items": {
+              "enum": [
+                "sight",
+                "dining",
+                "transport",
+                "lodging",
+                "other",
+                "flight",
+                "airport",
+                "train",
+                "hsr",
+                "metro",
+                "bus",
+                "station",
+                "taxi",
+                "driving",
+                "carrental",
+                "fuel",
+                "chargingstation",
+                "parking",
+                "ferry",
+                "harbor",
+                "cycling",
+                "cablecar",
+                "hotel",
+                "guesthouse",
+                "camping",
+                "cafe",
+                "bar",
+                "dessert",
+                "market",
+                "fastfood",
+                "bakery",
+                "museum",
+                "artgallery",
+                "temple",
+                "castle",
+                "park",
+                "mountain",
+                "beach",
+                "waterfall",
+                "onsen",
+                "aquarium",
+                "zoo",
+                "viewpoint",
+                "diving",
+                "shopping",
+                "conveniencestore",
+                "souvenir",
+                "show",
+                "hospital",
+                "pharmacy",
+                "bank",
+                "postoffice",
+                "police",
+                "touristinfo",
+                "restroom",
+                "laundry"
+              ],
+              "type": "string"
+            },
+            "type": "array"
+          }
+        },
+        "type": "object"
+      },
+      "name": "list_inspirations"
+    },
+    {
+      "description": "Read one inspiration in full: everything list_inspirations shows plus the whole text that came with it, its photos and files (names and sizes; their contents are not readable here) and how it was added. Reading it here does not mark it read; use set_inspiration_read for that.",
+      "inputSchema": {
+        "properties": {
+          "inspirationId": {
+            "description": "Inspiration id from list_inspirations.",
+            "type": "string"
+          },
+          "tripId": {
+            "description": "Trip id from list_trips. Optional.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "inspirationId"
+        ],
+        "type": "object"
+      },
+      "name": "get_inspiration"
+    },
+    {
+      "description": "Save a new inspiration in a trip, the way the app's \"add inspiration\" sheet does: content is a link or a piece of text. Text with a web link in it saves that link and keeps the whole text as its description; text without one saves the text (first line as title). It is saved as read, not linked, private. The app fetches the page's title, picture and place, and picks a type when none is given, in the background a moment later. Photos and files cannot be added here.",
+      "inputSchema": {
+        "properties": {
+          "content": {
+            "description": "A link, or text (a link inside it is picked up).",
+            "type": "string"
+          },
+          "tripId": {
+            "description": "Trip id from list_trips. Optional.",
+            "type": "string"
+          },
+          "type": {
+            "description": "Event type. Leave it out and the app picks one when it reads the page.",
+            "enum": [
+              "sight",
+              "dining",
+              "transport",
+              "lodging",
+              "other",
+              "flight",
+              "airport",
+              "train",
+              "hsr",
+              "metro",
+              "bus",
+              "station",
+              "taxi",
+              "driving",
+              "carrental",
+              "fuel",
+              "chargingstation",
+              "parking",
+              "ferry",
+              "harbor",
+              "cycling",
+              "cablecar",
+              "hotel",
+              "guesthouse",
+              "camping",
+              "cafe",
+              "bar",
+              "dessert",
+              "market",
+              "fastfood",
+              "bakery",
+              "museum",
+              "artgallery",
+              "temple",
+              "castle",
+              "park",
+              "mountain",
+              "beach",
+              "waterfall",
+              "onsen",
+              "aquarium",
+              "zoo",
+              "viewpoint",
+              "diving",
+              "shopping",
+              "conveniencestore",
+              "souvenir",
+              "show",
+              "hospital",
+              "pharmacy",
+              "bank",
+              "postoffice",
+              "police",
+              "touristinfo",
+              "restroom",
+              "laundry"
+            ],
+            "type": "string"
+          }
+        },
+        "required": [
+          "content"
+        ],
+        "type": "object"
+      },
+      "name": "create_inspiration"
+    },
+    {
+      "description": "Mark an inspiration read or unread for the user (the app's unread badge counts the unread ones). Read marks are the user's own: on a shared trip the others keep theirs, and it works even on a trip the user cannot change.",
+      "inputSchema": {
+        "properties": {
+          "inspirationId": {
+            "description": "Inspiration id from list_inspirations.",
+            "type": "string"
+          },
+          "read": {
+            "description": "true: read; false: unread.",
+            "type": "boolean"
+          },
+          "tripId": {
+            "description": "Trip id from list_trips. Optional.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "inspirationId",
+          "read"
+        ],
+        "type": "object"
+      },
+      "name": "set_inspiration_read"
+    },
+    {
+      "description": "Turn an inspiration into something in the trip, as the app's \"Add to…\" does; afterwards it is read and linked, and records where it went (it stays linked while that thing exists). It can be added again elsewhere. Destinations: event — a new event with its title, type, place, description and link, and its photos, files or page picture as attachments; with no time given it goes into the first free slot the app would pick (or the unscheduled list when none is free); or pass date/dayNumber with startTime and endTime or durationMinutes (trip's time zone), or unscheduled: true. note — a private note with its photos (or page picture), description and link. shopping — a private item to buy; needs a name or a picture. attachment — its link (as a link attachment), photos and files, plus a link's saved page picture, on the event eventId, or as the trip's key attachments without eventId; text only does not fit. marker — a map marker at its place, or at where its photos were taken; needs a place or a photo. One that does not fit the destination is refused with the reason. To-dos are not a destination.",
+      "inputSchema": {
+        "properties": {
+          "date": {
+            "description": "event only: the day, YYYY-MM-DD. Or dayNumber.",
+            "type": "string"
+          },
+          "dayNumber": {
+            "description": "event only: the day; day 1 is the trip's first day. Or date.",
+            "minimum": 1,
+            "type": "integer"
+          },
+          "destination": {
+            "description": "Where it goes.",
+            "enum": [
+              "event",
+              "note",
+              "shopping",
+              "attachment",
+              "marker"
+            ],
+            "type": "string"
+          },
+          "durationMinutes": {
+            "description": "event only: how long, instead of endTime.",
+            "minimum": 1,
+            "type": "integer"
+          },
+          "endTime": {
+            "description": "event only: HH:mm. Or durationMinutes. Default: one hour.",
+            "type": "string"
+          },
+          "eventId": {
+            "description": "attachment only: the event (from list_events) to attach to. Leave out for key attachments.",
+            "type": "string"
+          },
+          "inspirationId": {
+            "description": "Inspiration id from list_inspirations.",
+            "type": "string"
+          },
+          "startTime": {
+            "description": "event only: HH:mm, 24-hour, in the trip's time zone.",
+            "type": "string"
+          },
+          "tripId": {
+            "description": "Trip id from list_trips. Optional.",
+            "type": "string"
+          },
+          "unscheduled": {
+            "description": "event only: true puts it in the unscheduled list (no day or time).",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "inspirationId",
+          "destination"
+        ],
+        "type": "object"
+      },
+      "name": "add_inspiration_to"
     }
   ]
 }
