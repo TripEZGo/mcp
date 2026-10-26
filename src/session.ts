@@ -7,6 +7,7 @@ import {
   connectionLostMessage,
   notConnectedMessage,
   unreachableMessage,
+  unsupportedArgumentsMessage,
   unsupportedToolMessage,
 } from "./messages.js";
 import {
@@ -77,6 +78,8 @@ interface Connection {
   protocolVersion?: string;
   uploadLimitBytes: number;
   appVersion?: string;
+  /** The app's own `tools/list`; undefined when it couldn't be fetched (then the release snapshot stays in use). */
+  appTools?: Tool[];
 }
 
 /**
@@ -89,10 +92,19 @@ export class SessionBridge {
   private clientInfo: Json | undefined;
   private clientProtocolVersion: string | undefined;
   private nextConnectId = 1;
+  /** The listed tools changed under the client; the next reply is followed by `notifications/tools/list_changed`. */
+  private listChangedPending = false;
 
   constructor(private readonly options: SessionBridgeOptions) {}
 
   async handle(line: string): Promise<string[]> {
+    const lines = await this.dispatch(line);
+    if (!this.listChangedPending) return lines;
+    this.listChangedPending = false;
+    return [...lines, LIST_CHANGED_LINE];
+  }
+
+  private async dispatch(line: string): Promise<string[]> {
     const raw = line.trim();
     if (raw === "") return [];
 
@@ -130,18 +142,17 @@ export class SessionBridge {
     this.clientProtocolVersion = version;
     return {
       protocolVersion: version,
-      capabilities: { tools: { listChanged: false } },
+      capabilities: { tools: { listChanged: true } },
       serverInfo: { name: "TripEZGo", version: this.options.version },
       instructions: INSTRUCTIONS,
     };
   }
 
   private tools(): Tool[] {
-    const local = new Set([CONNECT_TOOL_NAME, GUIDE_TOOL_NAME, LOCAL_TOOL_NAME]);
     return [
       connectTool(),
       guideTool(this.options.guide),
-      ...this.options.appTools.filter((tool) => !local.has(tool.name)),
+      ...withoutLocalTools(this.connection?.appTools ?? this.options.appTools),
       localTool(this.connection?.uploadLimitBytes ?? DEFAULT_UPLOAD_LIMIT_BYTES),
     ];
   }
@@ -171,6 +182,8 @@ export class SessionBridge {
       return [resultLine(id, result)];
     }
 
+    const refusal = checkAgainstAppTools(name, args, connection);
+    if (refusal) return [resultLine(id, refusal)];
     return this.forwardCall(id, name, raw, connection);
   }
 
@@ -252,6 +265,10 @@ export class SessionBridge {
       this.options.log?.(`notifications/initialized: ${(error as Error).message}`);
     }
 
+    connection.appTools = await this.fetchAppTools(connection);
+
+    // The client's list changes when the app's list replaces the snapshot, or the other way round.
+    if (connection.appTools || this.connection?.appTools) this.listChangedPending = true;
     this.connection = connection;
     this.options.log?.(`connected to ${baseUrl} (TripEZGo ${connection.appVersion ?? "?"})`);
     const instructions = typeof result.instructions === "string" ? result.instructions.trim() : "";
@@ -260,6 +277,51 @@ export class SessionBridge {
         "It stays connected while the Connect computer AI page is open on the iPhone." +
         (instructions ? `\n\nThe app's instructions:\n\n${instructions}` : ""),
     );
+  }
+
+  /**
+   * The app's own `tools/list`, so an older app is described by its own schemas. Any failure (timeout, HTTP error,
+   * malformed or empty answer) gives undefined: the release snapshot stays in use and nothing is checked.
+   */
+  private async fetchAppTools(connection: Connection): Promise<Tool[] | undefined> {
+    try {
+      const tools: Tool[] = [];
+      let cursor: string | undefined;
+      for (let page = 0; page < MAX_TOOL_PAGES; page++) {
+        const body = JSON.stringify({
+          jsonrpc: "2.0",
+          id: `tripezgo-tools-${this.nextConnectId++}`,
+          method: "tools/list",
+          ...(cursor === undefined ? {} : { params: { cursor } }),
+        });
+        const response = await this.post(connection.baseUrl, connection.token, body, sessionHeaders(connection));
+        const sessionId = response.headers.get("mcp-session-id");
+        if (sessionId) connection.sessionId = sessionId;
+        const text = await response.text();
+        if (!response.ok) throw new Error(`HTTP ${response.status}`);
+        let result: Json | undefined;
+        for (const bodyText of rpcBodies(text, response.headers.get("content-type") ?? "")) {
+          const message: unknown = JSON.parse(bodyText);
+          if (isObject(message) && isObject(message.result)) result = message.result;
+        }
+        if (!result || !Array.isArray(result.tools)) throw new Error("no tools array in the answer");
+        for (const tool of result.tools) {
+          if (!isObject(tool) || typeof tool.name !== "string" || tool.name === "" || !isObject(tool.inputSchema)) {
+            throw new Error("a tool without a name or inputSchema");
+          }
+          tools.push(tool as Tool);
+        }
+        if (typeof result.nextCursor !== "string" || result.nextCursor === "") {
+          if (tools.length === 0) throw new Error("an empty tool list");
+          return tools;
+        }
+        cursor = result.nextCursor;
+      }
+      throw new Error("too many pages");
+    } catch (error) {
+      this.options.log?.(`tools/list from the app failed, using the built-in tool list: ${(error as Error).message}`);
+      return undefined;
+    }
   }
 
   // MARK: forwarding
@@ -308,7 +370,9 @@ export class SessionBridge {
   }
 
   private drop(connection: Connection): void {
-    if (this.connection === connection) this.connection = undefined;
+    if (this.connection !== connection) return;
+    this.connection = undefined;
+    if (connection.appTools) this.listChangedPending = true;
   }
 
   private post(baseUrl: string, token: string, body: string, extra: Record<string, string>): Promise<Response> {
@@ -324,6 +388,30 @@ export class SessionBridge {
       signal: AbortSignal.timeout(this.options.timeoutMs ?? 60_000),
     });
   }
+}
+
+const LIST_CHANGED_LINE = JSON.stringify({ jsonrpc: "2.0", method: "notifications/tools/list_changed" });
+const MAX_TOOL_PAGES = 20;
+
+function withoutLocalTools(tools: Tool[]): Tool[] {
+  const local = new Set([CONNECT_TOOL_NAME, GUIDE_TOOL_NAME, LOCAL_TOOL_NAME]);
+  return tools.filter((tool) => !local.has(tool.name));
+}
+
+/**
+ * With the app's own tool list in hand: a tool the app lacks, or a top-level argument its schema doesn't list, is
+ * refused here rather than sent to an app that would ignore it. Names only; no type or nested checks.
+ */
+function checkAgainstAppTools(name: string, args: Json, connection: Connection): CallToolResult | undefined {
+  if (!connection.appTools) return undefined;
+  const tool = connection.appTools.find((candidate) => candidate.name === name);
+  if (!tool) return toolFailure(unsupportedToolMessage(name, connection.appVersion));
+  const schema = tool.inputSchema;
+  if (!isObject(schema.properties) || schema.additionalProperties === true) return undefined;
+  const accepted = Object.keys(schema.properties);
+  const rejected = Object.keys(args).filter((key) => !accepted.includes(key));
+  if (rejected.length === 0) return undefined;
+  return toolFailure(unsupportedArgumentsMessage(name, connection.appVersion, rejected, accepted));
 }
 
 function sessionHeaders(connection: Connection): Record<string, string> {

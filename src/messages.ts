@@ -86,6 +86,23 @@ export function unsupportedToolMessage(tool: string, appVersion: string | undefi
   );
 }
 
+export function unsupportedArgumentsMessage(
+  tool: string,
+  appVersion: string | undefined,
+  rejected: string[],
+  accepted: string[],
+): string {
+  const names = rejected.map((name) => `\`${name}\``).join(", ");
+  return (
+    `The TripEZGo app on the iPhone${appVersion ? ` (version ${appVersion})` : ""} doesn't accept ${rejected.length === 1 ? "the argument" : "the arguments"} ` +
+    `${names} for ${tool}, so nothing was sent and nothing changed. This app takes only: ` +
+    `${accepted.length > 0 ? accepted.map((name) => `\`${name}\``).join(", ") : "(no arguments)"}. ` +
+    `Call ${tool} again using only those arguments (the older format). ` +
+    "If the user needs the newer format, they can update TripEZGo from the App Store, reopen the " +
+    '"Connect computer AI" page, and paste the new connect sentence.'
+  );
+}
+
 function describeCause(error: Error): string {
   if (error instanceof TlsHandshakeError) return (error.cause as Error | undefined)?.message ?? error.message;
   if (error.name === "TimeoutError" || error.name === "AbortError") return "timed out";

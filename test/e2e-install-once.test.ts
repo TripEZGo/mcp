@@ -121,6 +121,7 @@ describe("the bundle with no arguments, under the official MCP SDK client", () =
     expect(app.requests.map((r) => JSON.parse(r.body.toString()).method)).toEqual([
       "initialize",
       "notifications/initialized",
+      "tools/list",
       "tools/call",
       "tools/call",
     ]);

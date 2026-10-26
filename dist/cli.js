@@ -128,6 +128,10 @@ function connectionLostMessage(status) {
 function unsupportedToolMessage(tool, appVersion) {
   return `The TripEZGo app on the iPhone${appVersion ? ` (version ${appVersion})` : ""} doesn't have ${tool} yet. Ask the user to update TripEZGo from the App Store, reopen the "Connect computer AI" page, and paste the new connect sentence; then call \`connect\` again and retry.`;
 }
+function unsupportedArgumentsMessage(tool, appVersion, rejected, accepted) {
+  const names = rejected.map((name) => `\`${name}\``).join(", ");
+  return `The TripEZGo app on the iPhone${appVersion ? ` (version ${appVersion})` : ""} doesn't accept ${rejected.length === 1 ? "the argument" : "the arguments"} ${names} for ${tool}, so nothing was sent and nothing changed. This app takes only: ${accepted.length > 0 ? accepted.map((name) => `\`${name}\``).join(", ") : "(no arguments)"}. Call ${tool} again using only those arguments (the older format). If the user needs the newer format, they can update TripEZGo from the App Store, reopen the "Connect computer AI" page, and paste the new connect sentence.`;
+}
 function describeCause(error) {
   if (error instanceof TlsHandshakeError) return error.cause?.message ?? error.message;
   if (error.name === "TimeoutError" || error.name === "AbortError") return "timed out";
@@ -1011,7 +1015,15 @@ var SessionBridge = class {
   clientInfo;
   clientProtocolVersion;
   nextConnectId = 1;
+  /** The listed tools changed under the client; the next reply is followed by `notifications/tools/list_changed`. */
+  listChangedPending = false;
   async handle(line) {
+    const lines = await this.dispatch(line);
+    if (!this.listChangedPending) return lines;
+    this.listChangedPending = false;
+    return [...lines, LIST_CHANGED_LINE];
+  }
+  async dispatch(line) {
     const raw = line.trim();
     if (raw === "") return [];
     let parsed;
@@ -1044,17 +1056,16 @@ var SessionBridge = class {
     this.clientProtocolVersion = version2;
     return {
       protocolVersion: version2,
-      capabilities: { tools: { listChanged: false } },
+      capabilities: { tools: { listChanged: true } },
       serverInfo: { name: "TripEZGo", version: this.options.version },
       instructions: INSTRUCTIONS
     };
   }
   tools() {
-    const local = /* @__PURE__ */ new Set([CONNECT_TOOL_NAME, GUIDE_TOOL_NAME, LOCAL_TOOL_NAME]);
     return [
       connectTool(),
       guideTool(this.options.guide),
-      ...this.options.appTools.filter((tool) => !local.has(tool.name)),
+      ...withoutLocalTools(this.connection?.appTools ?? this.options.appTools),
       localTool(this.connection?.uploadLimitBytes ?? DEFAULT_UPLOAD_LIMIT_BYTES)
     ];
   }
@@ -1079,6 +1090,8 @@ var SessionBridge = class {
       });
       return [resultLine(id, result)];
     }
+    const refusal = checkAgainstAppTools(name, args, connection);
+    if (refusal) return [resultLine(id, refusal)];
     return this.forwardCall(id, name, raw, connection);
   }
   planningGuide(args) {
@@ -1150,6 +1163,8 @@ var SessionBridge = class {
     } catch (error) {
       this.options.log?.(`notifications/initialized: ${error.message}`);
     }
+    connection.appTools = await this.fetchAppTools(connection);
+    if (connection.appTools || this.connection?.appTools) this.listChangedPending = true;
     this.connection = connection;
     this.options.log?.(`connected to ${baseUrl} (TripEZGo ${connection.appVersion ?? "?"})`);
     const instructions = typeof result.instructions === "string" ? result.instructions.trim() : "";
@@ -1160,6 +1175,50 @@ The app's instructions:
 
 ${instructions}` : "")
     );
+  }
+  /**
+   * The app's own `tools/list`, so an older app is described by its own schemas. Any failure (timeout, HTTP error,
+   * malformed or empty answer) gives undefined: the release snapshot stays in use and nothing is checked.
+   */
+  async fetchAppTools(connection) {
+    try {
+      const tools = [];
+      let cursor;
+      for (let page = 0; page < MAX_TOOL_PAGES; page++) {
+        const body = JSON.stringify({
+          jsonrpc: "2.0",
+          id: `tripezgo-tools-${this.nextConnectId++}`,
+          method: "tools/list",
+          ...cursor === void 0 ? {} : { params: { cursor } }
+        });
+        const response = await this.post(connection.baseUrl, connection.token, body, sessionHeaders(connection));
+        const sessionId = response.headers.get("mcp-session-id");
+        if (sessionId) connection.sessionId = sessionId;
+        const text = await response.text();
+        if (!response.ok) throw new Error(`HTTP ${response.status}`);
+        let result;
+        for (const bodyText of rpcBodies(text, response.headers.get("content-type") ?? "")) {
+          const message = JSON.parse(bodyText);
+          if (isObject(message) && isObject(message.result)) result = message.result;
+        }
+        if (!result || !Array.isArray(result.tools)) throw new Error("no tools array in the answer");
+        for (const tool of result.tools) {
+          if (!isObject(tool) || typeof tool.name !== "string" || tool.name === "" || !isObject(tool.inputSchema)) {
+            throw new Error("a tool without a name or inputSchema");
+          }
+          tools.push(tool);
+        }
+        if (typeof result.nextCursor !== "string" || result.nextCursor === "") {
+          if (tools.length === 0) throw new Error("an empty tool list");
+          return tools;
+        }
+        cursor = result.nextCursor;
+      }
+      throw new Error("too many pages");
+    } catch (error) {
+      this.options.log?.(`tools/list from the app failed, using the built-in tool list: ${error.message}`);
+      return void 0;
+    }
   }
   // MARK: forwarding
   async forwardCall(id, name, raw, connection) {
@@ -1195,7 +1254,9 @@ ${instructions}` : "")
     return /[\r\n]/.test(body) ? JSON.stringify(parsed) : body.trim();
   }
   drop(connection) {
-    if (this.connection === connection) this.connection = void 0;
+    if (this.connection !== connection) return;
+    this.connection = void 0;
+    if (connection.appTools) this.listChangedPending = true;
   }
   post(baseUrl, token, body, extra) {
     return (this.options.fetch ?? phoneFetch)(`${baseUrl}/mcp`, {
@@ -1211,6 +1272,23 @@ ${instructions}` : "")
     });
   }
 };
+var LIST_CHANGED_LINE = JSON.stringify({ jsonrpc: "2.0", method: "notifications/tools/list_changed" });
+var MAX_TOOL_PAGES = 20;
+function withoutLocalTools(tools) {
+  const local = /* @__PURE__ */ new Set([CONNECT_TOOL_NAME, GUIDE_TOOL_NAME, LOCAL_TOOL_NAME]);
+  return tools.filter((tool) => !local.has(tool.name));
+}
+function checkAgainstAppTools(name, args, connection) {
+  if (!connection.appTools) return void 0;
+  const tool = connection.appTools.find((candidate) => candidate.name === name);
+  if (!tool) return toolFailure(unsupportedToolMessage(name, connection.appVersion));
+  const schema = tool.inputSchema;
+  if (!isObject(schema.properties) || schema.additionalProperties === true) return void 0;
+  const accepted = Object.keys(schema.properties);
+  const rejected = Object.keys(args).filter((key) => !accepted.includes(key));
+  if (rejected.length === 0) return void 0;
+  return toolFailure(unsupportedArgumentsMessage(name, connection.appVersion, rejected, accepted));
+}
 function sessionHeaders(connection) {
   const headers = {};
   if (connection.sessionId) headers["Mcp-Session-Id"] = connection.sessionId;

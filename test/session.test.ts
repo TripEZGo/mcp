@@ -29,7 +29,7 @@ const call = (name: string, args: Record<string, unknown> = {}) =>
   JSON.stringify({ jsonrpc: "2.0", id: nextId++, method: "tools/call", params: { name, arguments: args } });
 
 /** The app's /mcp, as far as the bridge needs it. `tools` are the tools this app version has. */
-function appHandler(options: { token?: string; tools?: string[] } = {}) {
+function appHandler(options: { token?: string; tools?: string[]; toolList?: (msg: { params?: { cursor?: string } }) => unknown } = {}) {
   const token = options.token ?? TOKEN;
   const tools = options.tools ?? ["list_trips", "create_trip"];
   return (req: RecordedRequest) => {
@@ -63,6 +63,10 @@ function appHandler(options: { token?: string; tools?: string[] } = {}) {
       }
       return json(200, { jsonrpc: "2.0", id: msg.id, result: { content: [{ type: "text", text: `ran ${msg.params.name}` }] } });
     }
+    if (msg.method === "tools/list" && options.toolList) {
+      const reply = options.toolList(msg);
+      return typeof reply === "number" ? { status: reply } : json(200, { jsonrpc: "2.0", id: msg.id, result: reply });
+    }
     return json(200, { jsonrpc: "2.0", id: msg.id, result: {} });
   };
 }
@@ -84,7 +88,7 @@ describe("SessionBridge before connecting", () => {
 
     expect(reply.id).toBe(1);
     expect(reply.result.protocolVersion).toBe("2025-06-18");
-    expect(reply.result.capabilities).toEqual({ tools: { listChanged: false } });
+    expect(reply.result.capabilities).toEqual({ tools: { listChanged: true } });
     expect(reply.result.serverInfo).toEqual({ name: "TripEZGo", version: "0.2.0" });
     expect(reply.result.instructions).toMatch(/connect/);
     expect(reply.result.instructions).toMatch(/連接 TripEZGo/);
@@ -206,7 +210,7 @@ describe("SessionBridge connect", () => {
     expect(reply.result.content[0].text).toMatch(/1\.4\.0/);
     expect(reply.result.content[0].text).toMatch(/APP INSTRUCTIONS/);
     const bodies = app.requests.map((r) => JSON.parse(r.body.toString()));
-    expect(bodies.map((b) => b.method)).toEqual(["initialize", "notifications/initialized"]);
+    expect(bodies.map((b) => b.method)).toEqual(["initialize", "notifications/initialized", "tools/list"]);
     expect(bodies[0].params.clientInfo).toEqual({ name: "claude-code", version: "2.1.0" });
     expect(bodies[0].params.protocolVersion).toBe("2025-06-18");
     expect(app.requests[0].path).toBe("/mcp");
@@ -367,5 +371,157 @@ describe("SessionBridge connect", () => {
     } finally {
       await rm(dir, { recursive: true, force: true });
     }
+  });
+});
+
+const LIST_CHANGED = { jsonrpc: "2.0", method: "notifications/tools/list_changed" };
+/** What a 1.4.1 app lists: no `days` on create_trip. */
+const OLD_APP_TOOLS = [
+  { name: "list_trips", description: "old list", inputSchema: { type: "object", properties: {} } },
+  {
+    name: "create_trip",
+    description: "old create",
+    inputSchema: { type: "object", properties: { name: { type: "string" }, placeId: { type: "string" } }, required: ["name"] },
+  },
+  { name: "connect", description: "app's own", inputSchema: { type: "object" } },
+  { name: "free_form", description: "open", inputSchema: { type: "object", properties: {}, additionalProperties: true } },
+  { name: "no_props", description: "no props", inputSchema: { type: "object" } },
+];
+
+describe("SessionBridge with the app's own tool list", () => {
+  let app: FakeApp;
+  let baseUrl: string;
+  let bridge: SessionBridge;
+  const logs: string[] = [];
+  const listTools = async () =>
+    parse(await bridge.handle('{"jsonrpc":"2.0","id":9,"method":"tools/list"}')).result.tools as { name: string; description: string }[];
+  const connect = () => bridge.handle(call("connect", { address: baseUrl, token: TOKEN }));
+  const calls = () => app.requests.map((r) => JSON.parse(r.body.toString())).filter((m) => m.method === "tools/call");
+
+  beforeEach(async () => {
+    logs.length = 0;
+    app = new FakeApp(TOKEN);
+    app.handler = appHandler({ tools: ["list_trips", "create_trip", "free_form", "no_props"], toolList: () => ({ tools: OLD_APP_TOOLS }) });
+    baseUrl = await app.start();
+    bridge = new SessionBridge({ appTools: SNAPSHOT, guide: GUIDE, version: "0.2.0", allowLoopback: true, log: (m) => logs.push(m) });
+    await bridge.handle(JSON.stringify(CLIENT_INIT));
+  });
+
+  afterEach(async () => {
+    await app.stop();
+  });
+
+  it("asks the app for its tools with the session headers, lists them instead of the snapshot, and says the list changed", async () => {
+    const lines = await connect();
+
+    expect(JSON.parse(lines[0]).result.isError).toBeFalsy();
+    expect(lines.slice(1).map((l) => JSON.parse(l))).toEqual([LIST_CHANGED]);
+    const request = app.requests.at(-1)!;
+    expect(JSON.parse(request.body.toString()).method).toBe("tools/list");
+    expect(request.headers["mcp-session-id"]).toBe(`session-${TOKEN}`);
+    expect(request.headers["mcp-protocol-version"]).toBe("2025-06-18");
+
+    const tools = await listTools();
+    expect(tools.find((t) => t.name === "create_trip")!.description).toBe("old create");
+    expect(tools.filter((t) => t.name === "connect")).toHaveLength(1);
+    expect(tools.find((t) => t.name === "connect")!.description).not.toBe("app's own");
+    expect(tools.map((t) => t.name)).toEqual(
+      expect.arrayContaining(["connect", "get_planning_guide", "list_trips", "create_trip", "add_attachment_from_path"]),
+    );
+    // Only the reply to connect carries the notification.
+    expect(await bridge.handle('{"jsonrpc":"2.0","id":10,"method":"ping"}')).toHaveLength(1);
+  });
+
+  it("follows nextCursor to the end", async () => {
+    app.handler = appHandler({
+      toolList: (msg) =>
+        msg.params?.cursor === "p2" ? { tools: [OLD_APP_TOOLS[1]] } : { tools: [OLD_APP_TOOLS[0]], nextCursor: "p2" },
+    });
+    await connect();
+    expect((await listTools()).map((t) => t.name)).toEqual(expect.arrayContaining(["list_trips", "create_trip"]));
+    expect(app.requests.filter((r) => JSON.parse(r.body.toString()).method === "tools/list")).toHaveLength(2);
+  });
+
+  it("refuses a top-level argument the app's schema doesn't list, without sending it, and names the version and accepted names", async () => {
+    await connect();
+    const before = calls().length;
+
+    const reply = parse(await bridge.handle(call("create_trip", { name: "Kyoto", days: [{ day: 1 }] })));
+
+    expect(reply.result.isError).toBe(true);
+    const text = reply.result.content[0].text;
+    expect(text).toContain("1.4.0");
+    expect(text).toContain("`days`");
+    expect(text).toContain("`name`");
+    expect(text).toContain("`placeId`");
+    expect(calls()).toHaveLength(before);
+  });
+
+  it("forwards a call that only uses listed arguments, byte for byte", async () => {
+    await connect();
+    const line = call("create_trip", { name: "Kyoto", placeId: "p1" });
+
+    const reply = parse(await bridge.handle(line));
+
+    expect(reply.result.content[0].text).toBe("ran create_trip");
+    expect(app.requests.at(-1)!.body.toString()).toBe(line);
+  });
+
+  it("does not check a schema without properties or with additionalProperties: true", async () => {
+    await connect();
+    expect(parse(await bridge.handle(call("free_form", { anything: 1 }))).result.isError).toBeFalsy();
+    expect(parse(await bridge.handle(call("no_props", { anything: 1 }))).result.isError).toBeFalsy();
+  });
+
+  it("answers a tool the app's list lacks with the update message, without sending it", async () => {
+    await connect();
+    const before = calls().length;
+    const reply = parse(await bridge.handle(call("get_trip")));
+    expect(reply.result.isError).toBe(true);
+    expect(reply.result.content[0].text).toMatch(/App Store/);
+    expect(calls()).toHaveLength(before);
+  });
+
+  it.each([
+    ["an HTTP error", () => 500],
+    ["a malformed answer", () => ({ nope: true })],
+    ["a tool without a schema", () => ({ tools: [{ name: "x" }] })],
+    ["an empty list", () => ({ tools: [] })],
+  ])("falls back to the snapshot and forwards calls as today when tools/list gives %s", async (_label, toolList) => {
+    app.handler = appHandler({ toolList });
+
+    const lines = await connect();
+
+    expect(lines).toHaveLength(1);
+    expect(JSON.parse(lines[0]).result.isError).toBeFalsy();
+    expect(logs.some((m) => /tools\/list/.test(m))).toBe(true);
+    expect((await listTools()).find((t) => t.name === "create_trip")!.description).toBe("Create a trip");
+    const reply = parse(await bridge.handle(call("create_trip", { name: "x", days: [] })));
+    expect(reply.result.content[0].text).toBe("ran create_trip");
+  });
+
+  it("falls back to the snapshot when the app gives no result to tools/list", async () => {
+    bridge = new SessionBridge({ appTools: SNAPSHOT, guide: GUIDE, version: "0.2.0", allowLoopback: true, timeoutMs: 300, log: (m) => logs.push(m) });
+    await bridge.handle(JSON.stringify(CLIENT_INIT));
+    const base = appHandler();
+    app.handler = (req) => {
+      const msg = JSON.parse(req.body.toString());
+      if (msg.method !== "tools/list") return base(req);
+      return { status: 200, headers: { "Content-Type": "text/event-stream" }, body: "" };
+    };
+    const lines = await connect();
+    expect(lines).toHaveLength(1);
+    expect((await listTools()).find((t) => t.name === "create_trip")!.description).toBe("Create a trip");
+  });
+
+  it("goes back to the snapshot and says so when the connection is dropped", async () => {
+    await connect();
+    app.handler = () => ({ status: 401 });
+
+    const lines = await bridge.handle(call("list_trips"));
+
+    expect(JSON.parse(lines[0]).result.isError).toBe(true);
+    expect(lines.slice(1).map((l) => JSON.parse(l))).toEqual([LIST_CHANGED]);
+    expect((await listTools()).find((t) => t.name === "create_trip")!.description).toBe("Create a trip");
   });
 });
