@@ -70,7 +70,10 @@ GitHub changes nothing. The two newest versions are kept; the background log is 
 
 Before connecting, the server lists the app's tools from a snapshot built into each release
 (`snapshot/app-tools.json`), so clients that read the tool list only once still see them. Calling one before
-connecting answers with how to connect. Added by the server itself:
+connecting answers with how to connect. Once connected, the server lists the phone's own tools instead (and
+sends `notifications/tools/list_changed`), so an older app is described by its own schemas; a call with an
+argument that app doesn't list is refused before it reaches the phone, with the arguments it does take. Added by
+the server itself:
 
 | Tool | |
 |---|---|
