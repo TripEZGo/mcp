@@ -1,7 +1,7 @@
 {
   "tools": [
     {
-      "description": "List the user's trips (not the ones in the bin), with their dates, main place, time zone and whether you may change their contents (canEditContent: events, legs, to-dos, shopping, markers, attachments, notes) and the trip's own details (canEditTripInfo: name, dates, main place, time zone). Also tells you which trip is the default for this link.",
+      "description": "List the user's trips (not the ones in the bin), with their dates, each day's place and time zone (days), and whether you may change their contents (canEditContent: events, legs, to-dos, shopping, markers, attachments, notes) and the trip's own details (canEditTripInfo: name, dates, each day's place and time zone). Also tells you which trip is the default for this link.",
       "inputSchema": {
         "properties": {},
         "type": "object"
@@ -9,7 +9,7 @@
       "name": "list_trips"
     },
     {
-      "description": "Read one trip: name, dates (or day count when undecided), main place, time zone, and whether you may change its contents (canEditContent) and its own details (canEditTripInfo). Leave tripId out to read the default trip.",
+      "description": "Read one trip: name, dates (or day count when undecided), days (one entry per day: day number, date when the dates are decided, place {name, detail} or null, and timeZone, the IANA zone that day is read in), place and timeZone of the whole trip (day 1's, kept for older instructions; prefer days), and whether you may change its contents (canEditContent) and its own details (canEditTripInfo). Leave tripId out to read the default trip.",
       "inputSchema": {
         "properties": {
           "tripId": {
@@ -22,7 +22,7 @@
       "name": "get_trip"
     },
     {
-      "description": "Find a trip's main place: a city, region or island area (not a shop or an address). Returns candidates with a placeId, a name, a detail line (region and country) and the place's time zone. Pass the placeId to create_trip or update_trip. Places that span several time zones (a whole large country) are not offered; pick a city in it instead.",
+      "description": "Find a place for a day of a trip: a city, region or island area (not a shop or an address). Returns candidates with a placeId, a name, a detail line (region and country) and the place's time zone. Pass the placeId in the days of create_trip or update_trip. Places that span several time zones (a whole large country) are not offered; pick a city in it instead.",
       "inputSchema": {
         "properties": {
           "query": {
@@ -38,7 +38,7 @@
       "name": "search_trip_place"
     },
     {
-      "description": "Create a new trip. Give it a name and either startDate + endDate (YYYY-MM-DD) or, when the dates are not decided yet, dayCount (1-300). A trip lasts 1 to 300 days. Optionally set its main place (placeId from search_trip_place, or placeName to take the first match) and its time zone (by default it follows the main place, or the phone when there is no place). The new trip becomes the default for calls without tripId, and the trip the phone shows. The free plan holds 3 trips; when they are used up this fails and the user has to upgrade to Premium in the app on their phone.",
+      "description": "Create a new trip. Give it a name and either startDate + endDate (YYYY-MM-DD) or, when the dates are not decided yet, dayCount (1-300). A trip lasts 1 to 300 days. Every day has its own place and time zone: prefer days, one entry per day in day order (its length equals the number of days), each { placeId from search_trip_place, timeZone? }. A day without a placeId is refused, and the error lists which days. timeZone is { mode: followPlace | followPhone | custom, timeZone: IANA id for custom }; leave it out and the day follows its place (the phone when the place has no single zone). For compatibility with older instructions, a single placeId (or placeName) with an optional timeZone, without days, means every day has that place and zone; passing both days and those is refused. The new trip becomes the default for calls without tripId, and the trip the phone shows. The free plan holds 3 trips; when they are used up this fails and the user has to upgrade to Premium in the app on their phone.",
       "inputSchema": {
         "properties": {
           "dayCount": {
@@ -46,6 +46,43 @@
             "maximum": 300,
             "minimum": 1,
             "type": "integer"
+          },
+          "days": {
+            "description": "One entry per day, in day order: the length equals the trip's number of days. Every day needs a place.",
+            "items": {
+              "properties": {
+                "placeId": {
+                  "description": "The day's place: a placeId from search_trip_place. Required.",
+                  "type": "string"
+                },
+                "timeZone": {
+                  "description": "The day's time zone. Leave out to follow the day's place (the phone's zone when the place has no single zone).",
+                  "properties": {
+                    "mode": {
+                      "enum": [
+                        "followPlace",
+                        "followPhone",
+                        "custom"
+                      ],
+                      "type": "string"
+                    },
+                    "timeZone": {
+                      "description": "IANA identifier such as Asia/Tokyo. Only with mode custom. The app offers one zone per UTC offset (Seoul is Asia/Tokyo); a wrong one is refused with the list.",
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "mode"
+                  ],
+                  "type": "object"
+                }
+              },
+              "required": [
+                "placeId"
+              ],
+              "type": "object"
+            },
+            "type": "array"
           },
           "endDate": {
             "description": "Last day, YYYY-MM-DD. Pass with startDate.",
@@ -56,11 +93,11 @@
             "type": "string"
           },
           "placeId": {
-            "description": "Main place: a placeId from search_trip_place.",
+            "description": "Compatibility with older instructions; prefer days. A placeId from search_trip_place that every day gets. Without days.",
             "type": "string"
           },
           "placeName": {
-            "description": "Main place by name: the first search_trip_place match is used. Instead of placeId.",
+            "description": "Compatibility with older instructions; prefer days. A place by name (the first search_trip_place match) that every day gets. Instead of placeId, without days.",
             "type": "string"
           },
           "startDate": {
@@ -68,7 +105,7 @@
             "type": "string"
           },
           "timeZone": {
-            "description": "The trip's time zone.",
+            "description": "Compatibility with older instructions; prefer days. The time zone every day gets, with placeId or placeName. Without days.",
             "properties": {
               "mode": {
                 "enum": [
@@ -79,7 +116,7 @@
                 "type": "string"
               },
               "timeZone": {
-                "description": "IANA identifier such as Asia/Tokyo. Only with mode custom. The app offers one zone per UTC offset (Seoul is Asia/Tokyo); a wrong one is refused with the list.",
+                "description": "IANA identifier such as Asia/Tokyo. Only with mode custom.",
                 "type": "string"
               }
             },
@@ -97,18 +134,51 @@
       "name": "create_trip"
     },
     {
-      "description": "Change a trip's name, schedule, main place or time zone. Pass only what changes; fields equal to what the trip already has are left alone. Leave tripId out for the default trip. Schedule: startDate + endDate (YYYY-MM-DD), or dayCount (1-300) for undecided dates. Events are kept by day number, not by date: moving the start from Jul 1 to Jul 3 moves day 1's events to Jul 3. Shortening a trip deletes nothing; events on the days beyond the new end are hidden and come back if the trip is made longer again. The result's hiddenEventCount is how many events this change hid and reappearedEventCount how many hidden ones it brought back (0 when the day count did not change). When hiddenEventCount is above 0, always tell the user: those events are not deleted, the phone no longer shows them in the trip or the overview, they are listed under Settings > Itinerary > Hidden days, and making the trip longer again brings them back; list_events marks them hiddenBeyondTripEnd. Main place: placeId from search_trip_place, placeName to take the first match, or clearPlace: true. Time zone: mode followPlace (the main place's zone; needs a place with one time zone), followPhone (always the phone's current zone) or custom with an IANA timeZone such as Asia/Tokyo. Changing the time zone moves no event. Only the trip's owner may change these: a trip shared with the user by someone else is refused.",
+      "description": "Change a trip's name, schedule, or each day's place and time zone. Pass only what changes; fields equal to what the trip already has are left alone. Leave tripId out for the default trip. Schedule: startDate + endDate (YYYY-MM-DD), or dayCount (1-300) for undecided dates. Events are kept by day number, not by date: moving the start from Jul 1 to Jul 3 moves day 1's events to Jul 3. Shortening a trip deletes nothing; events on the days beyond the new end are hidden and come back if the trip is made longer again. The result's hiddenEventCount is how many events this change hid and reappearedEventCount how many hidden ones it brought back (0 when the day count did not change). When hiddenEventCount is above 0, always tell the user: those events are not deleted, the phone no longer shows them in the trip or the overview, they are listed in the trip's \"Trip details\" (旅程資訊 on a Chinese phone), the first step of editing the trip, and making the trip longer again brings them back; list_events marks them hiddenBeyondTripEnd. Places and time zones are per day: prefer days, which replaces all of them at once, one { placeId from search_trip_place, timeZone? } per day in day order, its length equal to the trip's number of days after this change; a day without a placeId is refused and the error lists which days. For compatibility with older instructions, a single placeId (or placeName) with an optional timeZone, without days, means every day gets that place and zone; passing both is refused, and clearPlace is refused because every day needs a place. timeZone is { mode: followPlace | followPhone | custom, timeZone: IANA id for custom }; leave it out and the day follows its place. Change only the dates or the day count and leave days out, and the days follow the app's rules: a longer trip copies the last day (its zone mode too) onto the new days, a shorter one drops the last days (a dropped day that has events keeps its place for when the trip is lengthened again). Changing a time zone moves no event. Only the trip's owner may change these: a trip shared with the user by someone else is refused.",
       "inputSchema": {
         "properties": {
-          "clearPlace": {
-            "description": "true removes the trip's main place.",
-            "type": "boolean"
-          },
           "dayCount": {
             "description": "Number of days when the dates are undecided. Instead of startDate/endDate.",
             "maximum": 300,
             "minimum": 1,
             "type": "integer"
+          },
+          "days": {
+            "description": "One entry per day, in day order: the length equals the trip's number of days. Every day needs a place.",
+            "items": {
+              "properties": {
+                "placeId": {
+                  "description": "The day's place: a placeId from search_trip_place. Required.",
+                  "type": "string"
+                },
+                "timeZone": {
+                  "description": "The day's time zone. Leave out to follow the day's place (the phone's zone when the place has no single zone).",
+                  "properties": {
+                    "mode": {
+                      "enum": [
+                        "followPlace",
+                        "followPhone",
+                        "custom"
+                      ],
+                      "type": "string"
+                    },
+                    "timeZone": {
+                      "description": "IANA identifier such as Asia/Tokyo. Only with mode custom. The app offers one zone per UTC offset (Seoul is Asia/Tokyo); a wrong one is refused with the list.",
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "mode"
+                  ],
+                  "type": "object"
+                }
+              },
+              "required": [
+                "placeId"
+              ],
+              "type": "object"
+            },
+            "type": "array"
           },
           "endDate": {
             "description": "Last day, YYYY-MM-DD. Pass with startDate.",
@@ -119,11 +189,11 @@
             "type": "string"
           },
           "placeId": {
-            "description": "Main place: a placeId from search_trip_place.",
+            "description": "Compatibility with older instructions; prefer days. A placeId from search_trip_place that every day gets. Without days.",
             "type": "string"
           },
           "placeName": {
-            "description": "Main place by name: the first search_trip_place match is used. Instead of placeId.",
+            "description": "Compatibility with older instructions; prefer days. A place by name (the first search_trip_place match) that every day gets. Instead of placeId, without days.",
             "type": "string"
           },
           "startDate": {
@@ -131,7 +201,7 @@
             "type": "string"
           },
           "timeZone": {
-            "description": "The trip's time zone.",
+            "description": "Compatibility with older instructions; prefer days. The time zone every day gets, with placeId or placeName. Without days.",
             "properties": {
               "mode": {
                 "enum": [
@@ -142,7 +212,7 @@
                 "type": "string"
               },
               "timeZone": {
-                "description": "IANA identifier such as Asia/Tokyo. Only with mode custom. The app offers one zone per UTC offset (Seoul is Asia/Tokyo); a wrong one is refused with the list.",
+                "description": "IANA identifier such as Asia/Tokyo. Only with mode custom.",
                 "type": "string"
               }
             },
@@ -161,7 +231,7 @@
       "name": "update_trip"
     },
     {
-      "description": "List a trip's events (the itinerary), day by day, with the leg (how you travel there) into each one. Times are HH:mm in the trip's time zone, as the app shows them; an event recorded in another time zone (a flight) also carries its own recorded times. Leave tripId out for the default trip. from / to (YYYY-MM-DD, inclusive) narrow it to those dates; unscheduled events without a day are only listed when neither is given. Each event has: id, title, type, kind (timed, allDay or unscheduled), date and dayNumber (day 1 is the first day), startTime/endTime with a dayOffset when they fall on another calendar day, place, notes, cancelled, todoCount, attachmentCount, leg (into this event: fromEventId, mode, minutes, note…) and closingLeg (from this event to the day's closing all-day event).",
+      "description": "List a trip's events (the itinerary), day by day, with the leg (how you travel there) into each one. Times are HH:mm in the time zone of the day the event is on (each timed event carries it as timeZone; the trip's days list them too), as the app shows them; an event recorded in another time zone (a flight) also carries its own recorded times. Leave tripId out for the default trip. from / to (YYYY-MM-DD, inclusive) narrow it to those dates; unscheduled events without a day are only listed when neither is given. Each event has: id, title, type, kind (timed, allDay or unscheduled), date and dayNumber (day 1 is the first day), startTime/endTime with a dayOffset when they fall on another calendar day, place, notes, cancelled, todoCount, attachmentCount, leg (into this event: fromEventId, mode, minutes, note…) and closingLeg (from this event to the day's closing all-day event).",
       "inputSchema": {
         "properties": {
           "from": {
@@ -182,11 +252,20 @@
       "name": "list_events"
     },
     {
-      "description": "Find a place for an event or a custom map marker: a shop, a sight, a station, a hotel or an address (a trip's main place comes from search_trip_place instead). Uses the same search as the app's event form. By default it looks around the trip's main place; pass near (latitude/longitude, e.g. the previous event's place) to look around there instead. Returns candidates with a placeId, name, address, coordinates and suggestedType (the event type the app would pick for it when the event is titled with the place's name). Pass the placeId to create_event, update_event, create_marker or update_marker; placeIds last for this link only. If the candidates look unrelated, retry with the place's English or local-language name.",
+      "description": "Find a place for an event or a custom map marker: a shop, a sight, a station, a hotel or an address (a trip's places come from search_trip_place instead). Uses the same search as the app's event form. By default it looks around the place of day 1; pass dayNumber (or date) to look around that day's place, or near (latitude/longitude, e.g. the previous event's place) to look around there instead. Returns candidates with a placeId, name, address, coordinates and suggestedType (the event type the app would pick for it when the event is titled with the place's name). Pass the placeId to create_event, update_event, create_marker or update_marker; placeIds last for this link only. If the candidates look unrelated, retry with the place's English or local-language name.",
       "inputSchema": {
         "properties": {
+          "date": {
+            "description": "Lean towards the place of this date, YYYY-MM-DD. Instead of dayNumber. Optional.",
+            "type": "string"
+          },
+          "dayNumber": {
+            "description": "Lean towards the place of this day (day 1 is the first day). Default: day 1. Optional.",
+            "minimum": 1,
+            "type": "integer"
+          },
           "near": {
-            "description": "Look around this point instead of the trip's main place.",
+            "description": "Look around this point instead of a day's place.",
             "properties": {
               "latitude": {
                 "type": "number"
@@ -206,7 +285,7 @@
             "type": "string"
           },
           "tripId": {
-            "description": "Trip id whose main place the search leans towards. Optional.",
+            "description": "Trip id whose place the search leans towards. Optional.",
             "type": "string"
           }
         },
@@ -218,7 +297,7 @@
       "name": "search_place"
     },
     {
-      "description": "Add an event to a trip's itinerary. Leave tripId out for the default trip. Kinds: a timed event (date or dayNumber, startTime, and endTime or durationMinutes; one hour by default), an all-day event (allDay: true, date or dayNumber, and endDate/endDayNumber for a span of days), or an unscheduled event (unscheduled: true; optional durationMinutes, optional day it belongs to). Day 1 is the trip's first day; a trip with undecided dates only takes dayNumber. Days must be inside the trip, as in the app's form. Times are HH:mm in the trip's time zone unless you pass eventTimeZone / endTimeZone (IANA), which records the event in that zone and reads the times there (a flight leaving Taipei and landing in Tokyo: eventTimeZone Asia/Taipei, endTimeZone Asia/Tokyo). An event that ends after midnight takes endDate/endDayNumber. Place: placeId from search_place (also fills the title and the type when you leave them out), or placeName for a name only (an address-looking name is located on the map, like typing it in the app). Leave type out and the app picks one from the title as its form does: the type it is sure of, else the place's category, else other (a title other than the place's name can differ from search_place's suggestedType; pass type to be sure).",
+      "description": "Add an event to a trip's itinerary. Leave tripId out for the default trip. Kinds: a timed event (date or dayNumber, startTime, and endTime or durationMinutes; one hour by default), an all-day event (allDay: true, date or dayNumber, and endDate/endDayNumber for a span of days), or an unscheduled event (unscheduled: true; optional durationMinutes, optional day it belongs to). Day 1 is the trip's first day; a trip with undecided dates only takes dayNumber. Days must be inside the trip, as in the app's form. Times are HH:mm in the that day's time zone unless you pass eventTimeZone / endTimeZone (IANA), which records the event in that zone and reads the times there (a flight leaving Taipei and landing in Tokyo: eventTimeZone Asia/Taipei, endTimeZone Asia/Tokyo). An event that ends after midnight takes endDate/endDayNumber. Place: placeId from search_place (also fills the title and the type when you leave them out), or placeName for a name only (an address-looking name is located on the map, like typing it in the app). Leave type out and the app picks one from the title as its form does: the type it is sure of, else the place's category, else other (a title other than the place's name can differ from search_place's suggestedType; pass type to be sure).",
       "inputSchema": {
         "properties": {
           "allDay": {
@@ -1581,7 +1660,7 @@
       "name": "set_inspiration_read"
     },
     {
-      "description": "Turn an inspiration into something in the trip, as the app's \"Add to…\" does; afterwards it is read and linked, and records where it went (it stays linked while that thing exists). It can be added again elsewhere. Destinations: event — a new event with its title, type, place, description and link, and its photos, files or page picture as attachments; with no time given it goes into the first free slot the app would pick (or the unscheduled list when none is free); or pass date/dayNumber with startTime and endTime or durationMinutes (trip's time zone), or unscheduled: true. note — a private note with its photos (or page picture), description and link. shopping — a private item to buy; needs a name or a picture. attachment — its link (as a link attachment), photos and files, plus a link's saved page picture, on the event eventId, or as the trip's key attachments without eventId; text only does not fit. marker — a map marker at its place, or at where its photos were taken; needs a place or a photo. One that does not fit the destination is refused with the reason. To-dos are not a destination.",
+      "description": "Turn an inspiration into something in the trip, as the app's \"Add to…\" does; afterwards it is read and linked, and records where it went (it stays linked while that thing exists). It can be added again elsewhere. Destinations: event — a new event with its title, type, place, description and link, and its photos, files or page picture as attachments; with no time given it goes into the first free slot the app would pick (or the unscheduled list when none is free); or pass date/dayNumber with startTime and endTime or durationMinutes (that day's time zone), or unscheduled: true. note — a private note with its photos (or page picture), description and link. shopping — a private item to buy; needs a name or a picture. attachment — its link (as a link attachment), photos and files, plus a link's saved page picture, on the event eventId, or as the trip's key attachments without eventId; text only does not fit. marker — a map marker at its place, or at where its photos were taken; needs a place or a photo. One that does not fit the destination is refused with the reason. To-dos are not a destination.",
       "inputSchema": {
         "properties": {
           "date": {
@@ -1622,7 +1701,7 @@
             "type": "string"
           },
           "startTime": {
-            "description": "event only: HH:mm, 24-hour, in the trip's time zone.",
+            "description": "event only: HH:mm, 24-hour, in that day's time zone.",
             "type": "string"
           },
           "tripId": {
